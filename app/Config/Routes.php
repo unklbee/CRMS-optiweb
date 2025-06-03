@@ -34,6 +34,8 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->resource('service-categories', ['controller' => 'ServiceCategoryController']);
 
         // Parts management
+        $routes->get('parts/(:num)/adjust-stock', 'PartController::adjustStock/$1');
+        $routes->post('parts/(:num)/adjust-stock', 'PartController::updateStock/$1');
         $routes->resource('parts', ['controller' => 'PartController']);
 
         // User management

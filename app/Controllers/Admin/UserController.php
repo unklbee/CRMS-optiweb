@@ -5,6 +5,7 @@ namespace App\Controllers\Admin;
 
 use App\Controllers\BaseController;
 use App\Models\UserModel;
+use CodeIgniter\Exceptions\PageNotFoundException;
 
 class UserController extends BaseController
 {
@@ -51,7 +52,7 @@ class UserController extends BaseController
         $user = $this->userModel->getUserWithProfile($id);
 
         if (!$user) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('User not found');
+            throw new PageNotFoundException('User not found');
         }
 
         $data = [
@@ -109,7 +110,7 @@ class UserController extends BaseController
         $user = $this->userModel->find($id);
 
         if (!$user) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('User not found');
+            throw new PageNotFoundException('User not found');
         }
 
         $data = [
@@ -125,7 +126,7 @@ class UserController extends BaseController
         $user = $this->userModel->find($id);
 
         if (!$user) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('User not found');
+            throw new PageNotFoundException('User not found');
         }
 
         $rules = [
@@ -171,7 +172,7 @@ class UserController extends BaseController
         $user = $this->userModel->find($id);
 
         if (!$user) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('User not found');
+            throw new PageNotFoundException('User not found');
         }
 
         // Prevent deleting current user

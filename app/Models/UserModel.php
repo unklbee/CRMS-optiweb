@@ -19,21 +19,23 @@ class UserModel extends Model
 
     protected bool $allowEmptyInserts = false;
     protected $validationRules = [
-        'part_number' => 'required|min_length[2]|max_length[50]|is_unique[parts.part_number,id,{id}]',
-        'name' => 'required|min_length[2]|max_length[100]',
-        'cost_price' => 'required|decimal',
-        'selling_price' => 'required|decimal',
-        'stock_quantity' => 'required|integer',
-        'min_stock' => 'required|integer'
+        'username' => 'required|min_length[3]|max_length[50]|is_unique[users.username,id,{id}]',
+        'email' => 'required|valid_email|is_unique[users.email,id,{id}]',
+        'password' => 'permit_empty|min_length[6]',
+        'full_name' => 'required|min_length[2]|max_length[100]',
+        'role' => 'required|in_list[admin,technician,customer]'
     ];
 
     protected $useTimestamps = true;
     protected $createdField = 'created_at';
     protected $updatedField = 'updated_at';
 
+    protected $beforeInsert = ['hashPassword'];
+    protected $beforeUpdate = ['hashPassword'];
+
     protected function hashPassword(array $data): array
     {
-        if (isset($data['data']['password'])) {
+        if (!empty($data['data']['password'])) {
             $data['data']['password'] = password_hash($data['data']['password'], PASSWORD_DEFAULT);
         }
         return $data;
@@ -45,4 +47,12 @@ class UserModel extends Model
             ->where('status', 'active')
             ->findAll();
     }
+
+    public function getUserWithProfile($id): array|object|null
+    {
+        // For now, just return the user data
+        // In future, this could join with profile or other related tables
+        return $this->find($id);
+    }
+
 }
