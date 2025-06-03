@@ -58,7 +58,7 @@ class ServiceCategoryController extends BaseController
         return view('admin/service_categories/show', $data);
     }
 
-    public function create()
+    public function new()
     {
         $data = [
             'title' => 'Add New Category'

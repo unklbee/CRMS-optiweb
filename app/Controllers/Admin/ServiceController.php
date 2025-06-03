@@ -74,7 +74,7 @@ class ServiceController extends BaseController
             'categories' => $this->serviceCategoryModel->getActiveCategories()
         ];
 
-        return view('admin/services/new', $data);
+        return view('admin/services/create', $data);
     }
 
     public function store()

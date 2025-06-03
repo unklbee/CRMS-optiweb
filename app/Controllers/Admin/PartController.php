@@ -3,6 +3,7 @@ namespace App\Controllers\Admin;
 
 use App\Controllers\BaseController;
 use App\Models\PartModel;
+use CodeIgniter\Exceptions\PageNotFoundException;
 
 class PartController extends BaseController
 {
@@ -57,7 +58,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         $data = [
@@ -68,7 +69,7 @@ class PartController extends BaseController
         return view('admin/parts/show', $data);
     }
 
-    public function create()
+    public function new(): string
     {
         // Get existing categories for dropdown
         $categories = $this->partModel->select('category')
@@ -128,7 +129,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         // Get existing categories for dropdown
@@ -152,7 +153,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         $rules = [
@@ -195,7 +196,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         if ($this->partModel->delete($id)) {
@@ -210,7 +211,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         $data = [
@@ -226,7 +227,7 @@ class PartController extends BaseController
         $part = $this->partModel->find($id);
 
         if (!$part) {
-            throw new \CodeIgniter\Exceptions\PageNotFoundException('Part not found');
+            throw new PageNotFoundException('Part not found');
         }
 
         $rules = [
