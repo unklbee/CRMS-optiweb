@@ -1,0 +1,16 @@
+// =====================================================
+// Commands untuk setup database:
+/*
+// Jalankan perintah ini di terminal untuk setup database:
+
+// 1. Jalankan migration
+php spark migrate
+
+// 2. Jalankan seeder
+php spark db:seed DatabaseSeeder
+
+// 3. Atau jalankan migration dan seeder sekaligus
+php spark migrate --all && php spark db:seed DatabaseSeeder
+
+// 4. Untuk reset database dan isi ulang data
+php spark migrate:rollback
