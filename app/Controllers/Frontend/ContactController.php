@@ -7,7 +7,7 @@ use CodeIgniter\Email\Email;
 
 class ContactController extends BaseController
 {
-    public function index(): string
+    public function index()
     {
         $data = [
             'title' => 'Contact Us',
