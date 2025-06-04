@@ -21,10 +21,10 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('/', 'DashboardController::index'); // redirect ke dashboard
         $routes->get('dashboard', 'DashboardController::index');
 
-        // Order management
-        $routes->resource('orders', ['controller' => 'OrderController']);
+        // Order management - specific routes first, then resource
         $routes->get('orders/(:num)/status', 'OrderController::updateStatus/$1');
         $routes->post('orders/(:num)/status', 'OrderController::saveStatus/$1');
+        $routes->resource('orders', ['controller' => 'OrderController']);
 
         // Customer management
         $routes->resource('customers', ['controller' => 'CustomerController']);
@@ -33,7 +33,7 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->resource('services', ['controller' => 'ServiceController']);
         $routes->resource('service-categories', ['controller' => 'ServiceCategoryController']);
 
-        // Parts management
+        // Parts management - specific routes first, then resource
         $routes->get('parts/(:num)/adjust-stock', 'PartController::adjustStock/$1');
         $routes->post('parts/(:num)/adjust-stock', 'PartController::updateStock/$1');
         $routes->resource('parts', ['controller' => 'PartController']);
@@ -41,10 +41,23 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         // User management
         $routes->resource('users', ['controller' => 'UserController']);
 
-        // CMS management
+        // CMS management - specific routes first, then resource
+        $routes->get('pages/(:num)/duplicate', 'PageController::duplicate/$1');
         $routes->resource('pages', ['controller' => 'PageController']);
+
+        // Settings management
         $routes->get('settings', 'SettingController::index');
         $routes->post('settings', 'SettingController::update');
+        $routes->get('settings/new', 'SettingController::create');
+        $routes->post('settings/create', 'SettingController::store');
+        $routes->get('settings/(:num)/edit', 'SettingController::edit/$1');
+        $routes->post('settings/(:num)', 'SettingController::updateSingle/$1');
+        $routes->delete('settings/(:num)', 'SettingController::delete/$1');
+        $routes->get('settings/backup', 'SettingController::backup');
+        $routes->get('settings/restore', 'SettingController::restore');
+        $routes->post('settings/restore', 'SettingController::processRestore');
+        $routes->get('settings/cache', 'SettingController::cache');
+        $routes->post('settings/cache/clear', 'SettingController::clearCache');
     });
 });
 
@@ -66,5 +79,5 @@ $routes->group('', ['namespace' => 'App\Controllers\Frontend'], function($routes
     $routes->post('book-service', 'OrderController::store');
     $routes->get('contact', 'ContactController::index');
     $routes->post('contact', 'ContactController::send');
-    $routes->get('(:segment)', 'PageController::show/$1'); // CMS pages
+    $routes->get('(:segment)', 'PageController::show/$1'); // CMS pages (harus di akhir)
 });

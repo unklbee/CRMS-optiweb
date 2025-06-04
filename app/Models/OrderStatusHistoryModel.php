@@ -11,13 +11,15 @@ class OrderStatusHistoryModel extends Model
         'order_id', 'old_status', 'new_status', 'notes', 'changed_by'
     ];
 
+    // Hanya menggunakan created_at, tidak ada updated_at untuk history log
     protected $useTimestamps = true;
     protected $createdField = 'created_at';
+    protected $updatedField = ''; // Kosongkan karena tidak ada updated_at
 
     public function getOrderHistory($orderId): array
     {
         return $this->select('order_status_history.*, users.full_name as changed_by_name')
-            ->join('users', 'users.id = order_status_history.changed_by')
+            ->join('users', 'users.id = order_status_history.changed_by', 'left')
             ->where('order_id', $orderId)
             ->orderBy('created_at', 'DESC')
             ->findAll();
@@ -30,8 +32,8 @@ class OrderStatusHistoryModel extends Model
             'old_status' => $oldStatus,
             'new_status' => $newStatus,
             'notes' => $notes,
-            'changed_by' => $changedBy,
-            'created_at' => date('Y-m-d H:i:s')
+            'changed_by' => $changedBy
+            // created_at akan otomatis ditambahkan oleh CodeIgniter
         ]);
     }
 
@@ -46,5 +48,4 @@ class OrderStatusHistoryModel extends Model
     {
         return $this->where('order_id', $orderId)->countAllResults();
     }
-
 }
