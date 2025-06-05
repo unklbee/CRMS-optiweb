@@ -372,3 +372,384 @@ if (!function_exists('get_next_status_options')) {
         return $options;
     }
 }
+
+
+if (!function_exists('record_stock_movement')) {
+    /**
+     * Helper function to record stock movement
+     */
+    function record_stock_movement($partId, $movementType, $quantityBefore, $quantityChange, $quantityAfter, $referenceType = 'manual', $referenceId = null, $unitCost = 0, $notes = null, $createdBy = null)
+    {
+        $stockMovementModel = new \App\Models\StockMovementModel();
+
+        return $stockMovementModel->recordMovement([
+            'part_id' => $partId,
+            'movement_type' => $movementType,
+            'quantity_before' => $quantityBefore,
+            'quantity_change' => $quantityChange,
+            'quantity_after' => $quantityAfter,
+            'reference_type' => $referenceType,
+            'reference_id' => $referenceId,
+            'unit_cost' => $unitCost,
+            'total_cost' => $unitCost * $quantityChange,
+            'notes' => $notes,
+            'created_by' => $createdBy ?: session()->get('user_id')
+        ]);
+    }
+}
+
+if (!function_exists('update_part_stock')) {
+    /**
+     * Helper function to update part stock and record movement
+     */
+    function update_part_stock($partId, $newQuantity, $movementType, $referenceType = 'manual', $referenceId = null, $notes = null, $unitCost = null)
+    {
+        $partModel = new \App\Models\PartModel();
+        $part = $partModel->find($partId);
+
+        if (!$part) {
+            return false;
+        }
+
+        $oldQuantity = (int)$part['stock_quantity'];
+        $quantityChange = abs($newQuantity - $oldQuantity);
+
+        // Update part stock
+        $updateResult = $partModel->update($partId, [
+            'stock_quantity' => $newQuantity,
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
+
+        if ($updateResult && $quantityChange > 0) {
+            // Record stock movement
+            record_stock_movement(
+                $partId,
+                $movementType,
+                $oldQuantity,
+                $quantityChange,
+                $newQuantity,
+                $referenceType,
+                $referenceId,
+                $unitCost ?: $part['cost_price'],
+                $notes
+            );
+        }
+
+        return $updateResult;
+    }
+}
+
+if (!function_exists('use_part_for_order')) {
+    /**
+     * Helper function to use part in an order
+     */
+    function use_part_for_order($partId, $quantity, $orderId, $unitPrice = null, $notes = null)
+    {
+        $partModel = new \App\Models\PartModel();
+        $part = $partModel->find($partId);
+
+        if (!$part) {
+            return false;
+        }
+
+        $currentStock = (int)$part['stock_quantity'];
+
+        // Check if enough stock available
+        if ($currentStock < $quantity) {
+            return false;
+        }
+
+        $newStock = $currentStock - $quantity;
+        $price = $unitPrice ?: $part['selling_price'];
+
+        // Update stock
+        $updateResult = $partModel->update($partId, [
+            'stock_quantity' => $newStock,
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
+
+        if ($updateResult) {
+            // Record movement
+            record_stock_movement(
+                $partId,
+                'use',
+                $currentStock,
+                $quantity,
+                $newStock,
+                'order',
+                $orderId,
+                $price,
+                $notes ?: "Used in order #{$orderId}"
+            );
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('return_part_from_order')) {
+    /**
+     * Helper function to return part to stock from an order
+     */
+    function return_part_from_order($partId, $quantity, $orderId, $unitPrice = null, $notes = null)
+    {
+        $partModel = new \App\Models\PartModel();
+        $part = $partModel->find($partId);
+
+        if (!$part) {
+            return false;
+        }
+
+        $currentStock = (int)$part['stock_quantity'];
+        $newStock = $currentStock + $quantity;
+        $price = $unitPrice ?: $part['cost_price'];
+
+        // Update stock
+        $updateResult = $partModel->update($partId, [
+            'stock_quantity' => $newStock,
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
+
+        if ($updateResult) {
+            // Record movement
+            record_stock_movement(
+                $partId,
+                'return',
+                $currentStock,
+                $quantity,
+                $newStock,
+                'order',
+                $orderId,
+                $price,
+                $notes ?: "Returned from order #{$orderId}"
+            );
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('get_low_stock_parts')) {
+    /**
+     * Get parts with low stock
+     */
+    function get_low_stock_parts($limit = null)
+    {
+        $partModel = new \App\Models\PartModel();
+        $query = $partModel->where('stock_quantity <=', 'min_stock', false)
+            ->where('status', 'active')
+            ->orderBy('stock_quantity', 'ASC');
+
+        if ($limit) {
+            $query->limit($limit);
+        }
+
+        return $query->findAll();
+    }
+}
+
+if (!function_exists('get_part_usage_stats')) {
+    /**
+     * Get part usage statistics
+     */
+    function get_part_usage_stats($partId, $days = 30)
+    {
+        $stockMovementModel = new \App\Models\StockMovementModel();
+        $orderPartModel = new \App\Models\OrderPartModel();
+
+        $startDate = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+
+        // Get usage from stock movements
+        $movements = $stockMovementModel
+            ->where('part_id', $partId)
+            ->where('movement_type IN', ['use', 'subtract'])
+            ->where('created_at >=', $startDate)
+            ->findAll();
+
+        // Get revenue from order parts
+        $orderParts = $orderPartModel
+            ->select('order_parts.*, repair_orders.status')
+            ->join('repair_orders', 'repair_orders.id = order_parts.order_id')
+            ->where('order_parts.part_id', $partId)
+            ->where('order_parts.created_at >=', $startDate)
+            ->where('repair_orders.status !=', 'cancelled')
+            ->findAll();
+
+        $totalUsed = array_sum(array_column($movements, 'quantity_change'));
+        $totalRevenue = array_sum(array_column($orderParts, 'total_price'));
+        $timesUsed = count($orderParts);
+
+        return [
+            'total_used' => $totalUsed,
+            'total_revenue' => $totalRevenue,
+            'times_used' => $timesUsed,
+            'days_period' => $days,
+            'movements' => $movements,
+            'order_parts' => $orderParts
+        ];
+    }
+}
+
+if (!function_exists('get_stock_value_summary')) {
+    /**
+     * Get stock value summary
+     */
+    function get_stock_value_summary()
+    {
+        $partModel = new \App\Models\PartModel();
+        $parts = $partModel->where('status', 'active')->findAll();
+
+        $totalCostValue = 0;
+        $totalSellingValue = 0;
+        $lowStockCount = 0;
+        $outOfStockCount = 0;
+
+        foreach ($parts as $part) {
+            $stock = (int)$part['stock_quantity'];
+            $totalCostValue += $stock * $part['cost_price'];
+            $totalSellingValue += $stock * $part['selling_price'];
+
+            if ($stock <= 0) {
+                $outOfStockCount++;
+            } elseif ($stock <= $part['min_stock']) {
+                $lowStockCount++;
+            }
+        }
+
+        return [
+            'total_parts' => count($parts),
+            'total_cost_value' => $totalCostValue,
+            'total_selling_value' => $totalSellingValue,
+            'potential_profit' => $totalSellingValue - $totalCostValue,
+            'low_stock_count' => $lowStockCount,
+            'out_of_stock_count' => $outOfStockCount
+        ];
+    }
+}
+
+if (!function_exists('get_recent_stock_movements')) {
+    /**
+     * Get recent stock movements across all parts
+     */
+    function get_recent_stock_movements($limit = 20)
+    {
+        $stockMovementModel = new \App\Models\StockMovementModel();
+
+        return $stockMovementModel->getRecentMovements($limit);
+    }
+}
+
+if (!function_exists('get_parts_needing_reorder')) {
+    /**
+     * Get parts that need reordering
+     */
+    function get_parts_needing_reorder()
+    {
+        $partModel = new \App\Models\PartModel();
+
+        return $partModel->select('
+                parts.*,
+                (min_stock - stock_quantity) as shortage_quantity,
+                (min_stock - stock_quantity) * cost_price as reorder_cost
+            ')
+            ->where('stock_quantity <', 'min_stock', false)
+            ->where('status', 'active')
+            ->orderBy('shortage_quantity', 'DESC')
+            ->findAll();
+    }
+}
+
+if (!function_exists('calculate_inventory_turnover')) {
+    /**
+     * Calculate inventory turnover for a part
+     */
+    function calculate_inventory_turnover($partId, $days = 365)
+    {
+        $stockMovementModel = new \App\Models\StockMovementModel();
+        $partModel = new \App\Models\PartModel();
+
+        $part = $partModel->find($partId);
+        if (!$part) {
+            return null;
+        }
+
+        $startDate = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+
+        // Get total used in the period
+        $totalUsed = $stockMovementModel
+            ->selectSum('quantity_change', 'total_used')
+            ->where('part_id', $partId)
+            ->where('movement_type IN', ['use', 'subtract'])
+            ->where('created_at >=', $startDate)
+            ->first()['total_used'] ?? 0;
+
+        $averageInventory = $part['stock_quantity']; // Simplified - could be more sophisticated
+
+        if ($averageInventory > 0) {
+            $turnoverRatio = $totalUsed / $averageInventory;
+            $daysToTurnover = $averageInventory > 0 ? ($days / $turnoverRatio) : 0;
+
+            return [
+                'turnover_ratio' => $turnoverRatio,
+                'days_to_turnover' => $daysToTurnover,
+                'total_used' => $totalUsed,
+                'average_inventory' => $averageInventory,
+                'period_days' => $days
+            ];
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('generate_stock_report')) {
+    /**
+     * Generate comprehensive stock report
+     */
+    function generate_stock_report($format = 'array')
+    {
+        $summary = get_stock_value_summary();
+        $lowStockParts = get_low_stock_parts();
+        $reorderParts = get_parts_needing_reorder();
+        $recentMovements = get_recent_stock_movements(50);
+
+        $report = [
+            'generated_at' => date('Y-m-d H:i:s'),
+            'summary' => $summary,
+            'low_stock_parts' => $lowStockParts,
+            'parts_needing_reorder' => $reorderParts,
+            'recent_movements' => $recentMovements,
+            'recommendations' => []
+        ];
+
+        // Add recommendations
+        if (count($lowStockParts) > 0) {
+            $report['recommendations'][] = [
+                'type' => 'warning',
+                'message' => count($lowStockParts) . ' parts have low stock levels and need attention.'
+            ];
+        }
+
+        if (count($reorderParts) > 0) {
+            $totalReorderCost = array_sum(array_column($reorderParts, 'reorder_cost'));
+            $report['recommendations'][] = [
+                'type' => 'action',
+                'message' => 'Consider reordering ' . count($reorderParts) . ' parts. Estimated cost: ' . format_currency($totalReorderCost)
+            ];
+        }
+
+        if ($summary['potential_profit'] > 0) {
+            $profitMargin = ($summary['potential_profit'] / $summary['total_selling_value']) * 100;
+            $report['recommendations'][] = [
+                'type' => 'info',
+                'message' => 'Current inventory profit margin: ' . number_format($profitMargin, 1) . '%'
+            ];
+        }
+
+        return $report;
+    }
+}

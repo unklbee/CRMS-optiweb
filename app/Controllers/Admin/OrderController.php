@@ -8,6 +8,9 @@ use App\Models\CustomerModel;
 use App\Models\DeviceTypeModel;
 use App\Models\UserModel;
 use App\Models\OrderStatusHistoryModel;
+use App\Models\OrderPartModel;
+use App\Models\PartModel;
+use App\Models\StockMovementModel;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\RedirectResponse;
 
@@ -17,6 +20,9 @@ class OrderController extends BaseController
     protected CustomerModel $customerModel;
     protected DeviceTypeModel $deviceTypeModel;
     protected UserModel $userModel;
+    protected OrderPartModel $orderPartModel;
+    protected PartModel $partModel;
+    protected StockMovementModel $stockMovementModel;
 
     public function __construct()
     {
@@ -24,6 +30,9 @@ class OrderController extends BaseController
         $this->customerModel = new CustomerModel();
         $this->deviceTypeModel = new DeviceTypeModel();
         $this->userModel = new UserModel();
+        $this->orderPartModel = new OrderPartModel();
+        $this->partModel = new PartModel();
+        $this->stockMovementModel = new StockMovementModel();
     }
 
     public function index(): string
@@ -100,18 +109,18 @@ class OrderController extends BaseController
             throw new PageNotFoundException('Order not found');
         }
 
-        // Get status history if OrderStatusHistoryModel exists
-        $statusHistory = [];
-        if (class_exists('\App\Models\OrderStatusHistoryModel')) {
-            $historyModel = new OrderStatusHistoryModel();
-            $statusHistory = $historyModel->getOrderHistory($id);
-        }
+        // Get parts used in this order
+        $orderParts = $this->orderPartModel->getOrderParts($id);
+
+        // Get stock movements for this order
+        $stockMovements = $this->stockMovementModel->getMovementsByReference('order', $id);
 
         $data = [
             'title' => 'Order Details',
             'order' => $order,
+            'order_parts' => $orderParts,
+            'stock_movements' => $stockMovements,
             'technicians' => $this->userModel->getTechnicians(),
-            'status_history' => $statusHistory,
             'statuses' => [
                 'received' => 'Received',
                 'diagnosed' => 'Diagnosed',
@@ -155,7 +164,7 @@ class OrderController extends BaseController
         }
 
         $data = [
-            'order_number' => $this->generateOrderNumber(),
+            'order_number' => generate_order_number(),
             'customer_id' => $this->request->getPost('customer_id'),
             'device_type_id' => $this->request->getPost('device_type_id'),
             'device_brand' => $this->request->getPost('device_brand'),
@@ -166,7 +175,6 @@ class OrderController extends BaseController
             'priority' => $this->request->getPost('priority'),
             'technician_id' => $this->request->getPost('technician_id'),
             'notes' => $this->request->getPost('notes'),
-            'status' => 'received',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s')
         ];
@@ -243,19 +251,7 @@ class OrderController extends BaseController
 
     public function updateStatus($id): string
     {
-        $order = $this->orderModel->select('
-                repair_orders.*,
-                customers.full_name as customer_name,
-                customers.phone as customer_phone,
-                customers.email as customer_email,
-                device_types.name as device_type_name,
-                users.full_name as technician_name
-            ')
-            ->join('customers', 'customers.id = repair_orders.customer_id')
-            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
-            ->join('users', 'users.id = repair_orders.technician_id', 'left')
-            ->where('repair_orders.id', $id)
-            ->first();
+        $order = $this->orderModel->find($id);
 
         if (!$order) {
             throw new PageNotFoundException('Order not found');
@@ -281,71 +277,38 @@ class OrderController extends BaseController
 
     public function saveStatus($id): RedirectResponse
     {
-        $order = $this->orderModel->select('
-                repair_orders.*,
-                customers.full_name as customer_name,
-                customers.phone as customer_phone,
-                customers.email as customer_email,
-                device_types.name as device_type_name,
-                users.full_name as technician_name
-            ')
-            ->join('customers', 'customers.id = repair_orders.customer_id')
-            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
-            ->join('users', 'users.id = repair_orders.technician_id', 'left')
-            ->where('repair_orders.id', $id)
-            ->first();
+        $order = $this->orderModel->find($id);
 
         if (!$order) {
             throw new PageNotFoundException('Order not found');
         }
 
-        $rules = [
-            'status' => 'required|in_list[received,diagnosed,waiting_approval,in_progress,waiting_parts,completed,delivered,cancelled]',
-            'notes' => 'permit_empty|max_length[500]'
-        ];
-
-        if (!$this->validate($rules)) {
-            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
-        }
-
         $newStatus = $this->request->getPost('status');
         $notes = $this->request->getPost('notes');
-        $oldStatus = $order['status'];
 
-        // Only update if status actually changed
-        if ($newStatus === $oldStatus) {
-            return redirect()->to("/admin/orders/{$id}")
-                ->with('info', 'Status was not changed');
-        }
-
-        // Log status change if OrderStatusHistoryModel exists
-        if (class_exists('\App\Models\OrderStatusHistoryModel')) {
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
-                $id,
-                $oldStatus,
-                $newStatus,
-                $notes,
-                session()->get('user_id')
-            );
-        }
+        // Log status change
+        $historyModel = new OrderStatusHistoryModel();
+        $historyModel->insert([
+            'order_id' => $id,
+            'old_status' => $order['status'],
+            'new_status' => $newStatus,
+            'notes' => $notes,
+            'changed_by' => session()->get('user_id'),
+            'created_at' => date('Y-m-d H:i:s')
+        ]);
 
         $updateData = [
             'status' => $newStatus,
             'updated_at' => date('Y-m-d H:i:s')
         ];
 
-        // Set completion time if status is completed or delivered
-        if (in_array($newStatus, ['completed', 'delivered']) && empty($order['completed_at'])) {
+        // Set completion time if status is completed
+        if ($newStatus === 'completed') {
             $updateData['completed_at'] = date('Y-m-d H:i:s');
         }
 
         if ($this->orderModel->update($id, $updateData)) {
-            // Send notification if customer has email
-            $this->sendStatusNotification($order, $newStatus);
-
-            return redirect()->to("/admin/orders/{$id}")
-                ->with('success', 'Order status updated successfully');
+            return redirect()->to("/admin/orders/{$id}")->with('success', 'Status updated successfully');
         }
 
         return redirect()->back()->with('error', 'Failed to update status');
@@ -367,36 +330,161 @@ class OrderController extends BaseController
     }
 
     /**
-     * Generate unique order number
+     * Manage parts for an order
      */
-    private function generateOrderNumber(): string
+    public function manageParts($id): string
     {
-        do {
-            $orderNumber = 'ORD' . date('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
-            $exists = $this->orderModel->where('order_number', $orderNumber)->first();
-        } while ($exists);
+        $order = $this->orderModel->find($id);
 
-        return $orderNumber;
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        // Get current parts in order
+        $orderParts = $this->orderPartModel->getOrderParts($id);
+
+        // Get available parts
+        $availableParts = $this->partModel->where('status', 'active')
+            ->where('stock_quantity >', 0)
+            ->orderBy('name', 'ASC')
+            ->findAll();
+
+        $data = [
+            'title' => 'Manage Order Parts',
+            'order' => $order,
+            'order_parts' => $orderParts,
+            'available_parts' => $availableParts
+        ];
+
+        return view('admin/orders/manage_parts', $data);
     }
 
     /**
-     * Send status notification to customer
+     * Add part to order
      */
-    private function sendStatusNotification($order, $newStatus): void
+    public function addPart($id)
     {
-        try {
-            // Only send if customer has email
-            if (!empty($order['customer_email'])) {
-                // You can implement email notification here
-                // Example using NotificationService if it exists
-                if (class_exists('\App\Libraries\NotificationService')) {
-                    $notificationService = new \App\Libraries\NotificationService();
-                    $notificationService->sendOrderStatusUpdate($order, $newStatus);
-                }
-            }
-        } catch (\Exception $e) {
-            // Log error but don't fail the status update
-            log_message('error', 'Failed to send status notification: ' . $e->getMessage());
+        $order = $this->orderModel->find($id);
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
         }
+
+        $rules = [
+            'part_id' => 'required|integer',
+            'quantity' => 'required|integer|greater_than[0]',
+            'unit_price' => 'required|decimal'
+        ];
+
+        if (!$this->validate($rules)) {
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        $partId = $this->request->getPost('part_id');
+        $quantity = (int)$this->request->getPost('quantity');
+        $unitPrice = (float)$this->request->getPost('unit_price');
+        $notes = $this->request->getPost('notes');
+
+        $part = $this->partModel->find($partId);
+        if (!$part) {
+            return redirect()->back()->with('error', 'Part not found');
+        }
+
+        // Check stock availability
+        if ($part['stock_quantity'] < $quantity) {
+            return redirect()->back()->with('error', "Insufficient stock. Available: {$part['stock_quantity']}, Requested: {$quantity}");
+        }
+
+        // Add part to order using the fixed method
+        $orderPartData = [
+            'order_id' => $id,
+            'part_id' => $partId,
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'total_price' => $quantity * $unitPrice,
+            'notes' => $notes,
+            'created_at' => date('Y-m-d H:i:s') // Explicitly set created_at
+        ];
+
+        // Use the fixed addPartToOrder method
+        $insertResult = $this->orderPartModel->addPartToOrder($orderPartData);
+
+        if ($insertResult) {
+            // Update part stock and record movement
+            $newStock = $part['stock_quantity'] - $quantity;
+
+            $updateSuccess = $this->partModel->update($partId, [
+                'stock_quantity' => $newStock,
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            if ($updateSuccess) {
+                // Record stock movement
+                $this->stockMovementModel->recordMovement([
+                    'part_id' => $partId,
+                    'movement_type' => 'use',
+                    'quantity_before' => $part['stock_quantity'],
+                    'quantity_change' => $quantity,
+                    'quantity_after' => $newStock,
+                    'reference_type' => 'order',
+                    'reference_id' => $id,
+                    'unit_cost' => $unitPrice,
+                    'notes' => $notes ?: "Used in order #{$order['order_number']}",
+                    'created_by' => session()->get('user_id')
+                ]);
+
+                return redirect()->back()->with('success', 'Part added to order successfully');
+            } else {
+                // Rollback: remove the order part if stock update failed
+                $this->orderPartModel->delete($insertResult);
+                return redirect()->back()->with('error', 'Failed to update stock. Part not added to order.');
+            }
+        }
+
+        return redirect()->back()->with('error', 'Failed to add part to order');
+    }
+
+    /**
+     * Remove part from order
+     */
+    public function removePart($orderId, $orderPartId): RedirectResponse
+    {
+        $order = $this->orderModel->find($orderId);
+        $orderPart = $this->orderPartModel->find($orderPartId);
+
+        if (!$order || !$orderPart) {
+            throw new PageNotFoundException('Order or part not found');
+        }
+
+        // Return stock
+        $part = $this->partModel->find($orderPart['part_id']);
+        if ($part) {
+            $newStock = $part['stock_quantity'] + $orderPart['quantity'];
+            $this->partModel->update($part['id'], [
+                'stock_quantity' => $newStock,
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            // Record stock movement
+            $this->stockMovementModel->recordMovement([
+                'part_id' => $part['id'],
+                'movement_type' => 'return',
+                'quantity_before' => $part['stock_quantity'],
+                'quantity_change' => $orderPart['quantity'],
+                'quantity_after' => $newStock,
+                'reference_type' => 'order',
+                'reference_id' => $orderId,
+                'unit_cost' => $orderPart['unit_price'],
+                'notes' => "Returned from order #{$order['order_number']}",
+                'created_by' => session()->get('user_id')
+            ]);
+        }
+
+        // Remove from order
+        if ($this->orderPartModel->delete($orderPartId)) {
+            return redirect()->back()->with('success', 'Part removed from order and stock restored');
+        }
+
+        return redirect()->back()->with('error', 'Failed to remove part from order');
     }
 }

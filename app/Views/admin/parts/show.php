@@ -140,14 +140,96 @@
                 <!-- Stock Movement History -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200">
                     <div class="p-6 border-b border-gray-200">
-                        <h3 class="text-lg font-semibold text-gray-800">Stock Movement History</h3>
-                    </div>
-                    <div class="p-6">
-                        <div class="text-center py-8">
-                            <i class="fas fa-history text-4xl text-gray-300 mb-4"></i>
-                            <h4 class="text-lg font-medium text-gray-900 mb-2">No Movement History</h4>
-                            <p class="text-gray-600">Stock movements will appear here when inventory is adjusted</p>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-semibold text-gray-800">Stock Movement History</h3>
+                            <button onclick="refreshMovements()" class="text-blue-600 hover:text-blue-800 text-sm">
+                                <i class="fas fa-refresh mr-1"></i>Refresh
+                            </button>
                         </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <?php if (!empty($movement_history)): ?>
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                                </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                <?php foreach ($movement_history as $movement): ?>
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <?= date('M d, Y H:i', strtotime($movement['created_at'])) ?>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <?php
+                                            $typeColors = [
+                                                'add' => 'bg-green-100 text-green-800',
+                                                'subtract' => 'bg-red-100 text-red-800',
+                                                'set' => 'bg-blue-100 text-blue-800',
+                                                'use' => 'bg-orange-100 text-orange-800',
+                                                'return' => 'bg-purple-100 text-purple-800',
+                                                'damage' => 'bg-red-100 text-red-800',
+                                                'loss' => 'bg-gray-100 text-gray-800'
+                                            ];
+                                            $color = $typeColors[$movement['movement_type']] ?? 'bg-gray-100 text-gray-800';
+                                            ?>
+                                            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full <?= $color ?>">
+                                                    <?= ucfirst($movement['movement_type']) ?>
+                                                </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <?php if (in_array($movement['movement_type'], ['add', 'return'])): ?>
+                                                <span class="text-green-600 font-medium">+<?= $movement['quantity_change'] ?></span>
+                                            <?php else: ?>
+                                                <span class="text-red-600 font-medium">-<?= $movement['quantity_change'] ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <div class="flex items-center space-x-2">
+                                                <span class="text-gray-500"><?= $movement['quantity_before'] ?></span>
+                                                <i class="fas fa-arrow-right text-gray-400"></i>
+                                                <span class="font-medium"><?= $movement['quantity_after'] ?></span>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <div>
+                                                <span class="font-medium text-gray-900"><?= ucfirst($movement['reference_type']) ?></span>
+                                                <?php if ($movement['reference_id'] && $movement['reference_type'] === 'order'): ?>
+                                                    <div class="text-xs text-gray-500">
+                                                        <a href="/admin/orders/<?= $movement['reference_id'] ?>" class="text-blue-600 hover:text-blue-800">
+                                                            Order #<?= $movement['reference_id'] ?>
+                                                        </a>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <?= $movement['created_by_name'] ?>
+                                        </td>
+                                    </tr>
+                                    <?php if ($movement['notes']): ?>
+                                        <tr class="bg-gray-50">
+                                            <td colspan="6" class="px-6 py-2 text-sm text-gray-600 italic">
+                                                <i class="fas fa-comment-alt mr-2"></i><?= $movement['notes'] ?>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php else: ?>
+                            <div class="text-center py-8">
+                                <i class="fas fa-history text-4xl text-gray-300 mb-4"></i>
+                                <h4 class="text-lg font-medium text-gray-900 mb-2">No Movement History</h4>
+                                <p class="text-gray-600">Stock movements will appear here when inventory is adjusted</p>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -203,6 +285,31 @@
                     </div>
                 </div>
 
+                <!-- Usage Statistics -->
+                <div class="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Usage Statistics</h3>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Times Used:</span>
+                            <span class="font-medium"><?= $usage_stats['times_used'] ?? 0 ?></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Total Quantity Used:</span>
+                            <span class="font-medium"><?= $usage_stats['total_quantity_used'] ?? 0 ?></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Revenue Generated:</span>
+                            <span class="font-medium"><?= format_currency($usage_stats['total_revenue'] ?? 0) ?></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Last Used:</span>
+                            <span class="font-medium">
+                                <?= $usage_stats['last_used'] ? date('M d, Y', strtotime($usage_stats['last_used'])) : 'Never' ?>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Quick Actions -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 class="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
@@ -252,25 +359,6 @@
                             <i class="fas fa-download mr-1"></i>Generate QR Code
                         </button>
                         <p class="text-xs text-gray-500 mt-2">For inventory tracking</p>
-                    </div>
-                </div>
-
-                <!-- Usage Statistics -->
-                <div class="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Usage Statistics</h3>
-                    <div class="space-y-3 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Times Used:</span>
-                            <span class="font-medium">0</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Revenue Generated:</span>
-                            <span class="font-medium"><?= format_currency(0) ?></span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Last Used:</span>
-                            <span class="font-medium">Never</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -334,17 +422,11 @@
 
             // For now, just show an alert. You can integrate with a QR code library
             alert('QR Code generation feature will be implemented with a QR code library');
+        }
 
-            // Example using qrcode.js library (if included):
-            // const qrData = JSON.stringify(partInfo);
-            // QRCode.toDataURL(qrData, function (err, url) {
-            //     if (!err) {
-            //         const link = document.createElement('a');
-            //         link.download = 'part_<?= $part['part_number'] ?>_qr.png';
-            //         link.href = url;
-            //         link.click();
-            //     }
-            // });
+        function refreshMovements() {
+            // Refresh the movement history
+            window.location.reload();
         }
 
         // Auto-refresh stock status if it's a low stock item
@@ -372,40 +454,6 @@
                     window.location.href = '/admin/parts/<?= $part['id'] ?>/adjust-stock';
                 }
             }
-        });
-
-        // Print functionality
-        function printPartLabel() {
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(`
-                <html>
-                <head>
-                    <title>Part Label - <?= $part['part_number'] ?></title>
-                    <style>
-                        body { font-family: Arial, sans-serif; padding: 20px; }
-                        .label { border: 2px solid #000; padding: 15px; width: 300px; }
-                        .part-number { font-size: 18px; font-weight: bold; }
-                        .part-name { font-size: 14px; margin: 5px 0; }
-                        .details { font-size: 12px; color: #666; }
-                    </style>
-                </head>
-                <body>
-                    <div class="label">
-                        <div class="part-number"><?= $part['part_number'] ?></div>
-                        <div class="part-name"><?= $part['name'] ?></div>
-                        <div class="details">Location: <?= $part['location'] ?: 'Not specified' ?></div>
-                        <div class="details">Price: <?= format_currency($part['selling_price']) ?></div>
-                    </div>
-                </body>
-                </html>
-            `);
-            printWindow.document.close();
-            printWindow.print();
-        }
-
-        // Add print button if needed
-        document.addEventListener('DOMContentLoaded', function() {
-            // You can add a print button to the quick actions if needed
         });
     </script>
 <?= $this->endSection() ?>
