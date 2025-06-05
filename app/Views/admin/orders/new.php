@@ -138,6 +138,29 @@
                               placeholder="Any additional notes or instructions..."><?= old('notes') ?></textarea>
                 </div>
 
+                <!-- Receipt Options - tambahkan sebelum Actions -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-medium text-blue-800 mb-3">
+                        <i class="fas fa-receipt mr-2"></i>Receipt Options
+                    </h4>
+                    <div class="space-y-2">
+                        <label class="flex items-center">
+                            <input type="checkbox" name="view_receipt" value="1" checked
+                                   class="mr-2 text-blue-600 rounded focus:ring-blue-500">
+                            <span class="text-sm text-blue-700">Generate service receipt after creating order</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="checkbox" name="print_receipt" value="1"
+                                   class="mr-2 text-blue-600 rounded focus:ring-blue-500">
+                            <span class="text-sm text-blue-700">Print receipt immediately (for customer copy)</span>
+                        </label>
+                    </div>
+                    <p class="text-xs text-blue-600 mt-2">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Service receipt serves as proof that device has been received for repair
+                    </p>
+                </div>
+
                 <!-- Actions -->
                 <div class="flex justify-end space-x-4 pt-6 border-t border-gray-200">
                     <a href="/admin/orders" class="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">

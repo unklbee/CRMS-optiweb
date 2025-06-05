@@ -45,6 +45,19 @@
                     Repair Orders
                 </a>
 
+                <a href="/admin/orders/diagnosis-queue" class="flex items-center px-4 py-3 text-gray-700 hover:bg-primary hover:text-white rounded-lg transition-colors mb-1 <?= (strpos(current_url(), 'diagnosis') !== false) ? 'bg-primary text-white' : '' ?>">
+                    <i class="fas fa-stethoscope mr-3"></i>
+                    Diagnosis Queue
+                    <?php
+                    // Show notification badge if there are pending diagnosis
+                    $orderModel = new \App\Models\RepairOrderModel();
+                    $pendingCount = $orderModel->where('diagnosis_status', 'pending')->countAllResults();
+                    if ($pendingCount > 0):
+                        ?>
+                        <span class="ml-auto bg-red-500 text-white text-xs rounded-full px-2 py-1"><?= $pendingCount ?></span>
+                    <?php endif; ?>
+                </a>
+
                 <a href="/admin/customers" class="flex items-center px-4 py-3 text-gray-700 hover:bg-primary hover:text-white rounded-lg transition-colors mb-1 <?= (strpos(current_url(), 'admin/customers') !== false) ? 'bg-primary text-white' : '' ?>">
                     <i class="fas fa-users mr-3"></i>
                     Customers

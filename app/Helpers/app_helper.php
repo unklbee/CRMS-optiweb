@@ -97,7 +97,7 @@ if (!function_exists('generate_order_number')) {
     /**
      * Generate unique order number
      */
-    function generate_order_number()
+    function generate_order_number(): string
     {
         return 'ORD' . date('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
     }

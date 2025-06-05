@@ -34,10 +34,25 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('orders/(:num)/status', 'OrderController::updateStatus/$1');
         $routes->post('orders/(:num)/status', 'OrderController::saveStatus/$1');
 
-        // NEW: Parts management in orders
+        // Diagnosis routes
+        $routes->get('orders/diagnosis-queue', 'OrderController::diagnosisQueue');
+        $routes->get('orders/(:num)/diagnosis', 'OrderController::diagnosis/$1');
+        $routes->post('orders/(:num)/diagnosis', 'OrderController::saveDiagnosis/$1');
+        $routes->get('orders/(:num)/start-diagnosis', 'OrderController::startDiagnosis/$1');
+
+        // Quotation routes
+        $routes->get('orders/(:num)/create-quotation', 'OrderController::createQuotation/$1');
+        $routes->post('orders/(:num)/quotation', 'OrderController::saveQuotation/$1');
+        $routes->get('orders/(:num)/quotation', 'OrderController::showQuotation/$1');
+        $routes->get('orders/(:num)/quotation/(:num)/send', 'OrderController::sendQuotation/$1/$2');
+
+        // Parts management in orders
         $routes->get('orders/(:num)/manage-parts', 'OrderController::manageParts/$1');
         $routes->post('orders/(:num)/parts', 'OrderController::addPart/$1');
         $routes->delete('orders/(:num)/parts/(:num)/remove', 'OrderController::removePart/$1/$2');
+        $routes->get('orders/(:num)/receipt', 'OrderController::receipt/$1');
+        $routes->get('orders/(:num)/email-receipt', 'OrderController::emailReceipt/$1');
+        $routes->get('orders/(:num)/delivery-receipt', 'OrderController::deliveryReceipt/$1');
 
         // Customer management
         $routes->get('customers', 'CustomerController::index');
@@ -153,4 +168,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Frontend'], function($routes
     $routes->get('contact', 'ContactController::index');
     $routes->post('contact', 'ContactController::send');
     $routes->get('(:segment)', 'PageController::show/$1'); // CMS pages
+});
+
+// Public quotation approval routes (outside admin group)
+$routes->group('', function($routes) {
+    $routes->get('quotation/(:num)/approve', 'OrderController::approveQuotation/$1');
+    $routes->post('quotation/(:num)/approve', 'OrderController::approveQuotation/$1');
+    $routes->get('quotation/(:num)/reject', 'OrderController::rejectQuotation/$1');
+    $routes->post('quotation/(:num)/reject', 'OrderController::rejectQuotation/$1');
 });

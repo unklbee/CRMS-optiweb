@@ -332,6 +332,45 @@
                                 class="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors">
                             <i class="fas fa-trash mr-2"></i>Delete Order
                         </button>
+
+                        <a href="/admin/orders/<?= $order['id'] ?>/receipt"
+                           class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors text-center block">
+                            <i class="fas fa-receipt mr-2"></i>Service Receipt
+                        </a>
+
+                        <?php if (in_array($order['status'], ['completed', 'delivered'])): ?>
+                            <a href="/admin/orders/<?= $order['id'] ?>/delivery-receipt"
+                               class="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors text-center block">
+                                <i class="fas fa-file-invoice mr-2"></i>Delivery Receipt
+                            </a>
+                        <?php endif; ?>
+
+                        <?php if (!empty($order['customer_email'])): ?>
+                            <button onclick="emailReceipt(<?= $order['id'] ?>)"
+                                    class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors">
+                                <i class="fas fa-envelope mr-2"></i>Email Receipt
+                            </button>
+                        <?php endif; ?>
+
+                        <!-- Diagnosis Actions -->
+                        <?php if (in_array($order['status'], ['received', 'diagnosed'])): ?>
+                            <?php if (($order['diagnosis_status'] ?? 'pending') === 'pending'): ?>
+                                <a href="/admin/orders/<?= $order['id'] ?>/start-diagnosis"
+                                   class="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition-colors text-center block">
+                                    <i class="fas fa-play mr-2"></i>Start Diagnosis
+                                </a>
+                            <?php elseif ($order['diagnosis_status'] === 'in_progress'): ?>
+                                <a href="/admin/orders/<?= $order['id'] ?>/diagnosis"
+                                   class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center block">
+                                    <i class="fas fa-stethoscope mr-2"></i>Continue Diagnosis
+                                </a>
+                            <?php else: ?>
+                                <a href="/admin/orders/<?= $order['id'] ?>/diagnosis"
+                                   class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-center block">
+                                    <i class="fas fa-eye mr-2"></i>View Diagnosis
+                                </a>
+                            <?php endif; ?>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -467,6 +506,12 @@
                 `;
                 document.body.appendChild(form);
                 form.submit();
+            }
+        }
+
+        function emailReceipt(orderId) {
+            if (confirm('Send service receipt to customer email?')) {
+                window.location.href = `/admin/orders/${orderId}/email-receipt`;
             }
         }
 

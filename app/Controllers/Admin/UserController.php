@@ -63,7 +63,7 @@ class UserController extends BaseController
         return view('admin/users/show', $data);
     }
 
-    public function new()
+    public function create()
     {
         $data = [
             'title' => 'Add New User'
