@@ -28,17 +28,17 @@ class Email extends BaseConfig
     /**
      * SMTP Server Address
      */
-    public string $SMTPHost = 'localhost';
+    public string $SMTPHost = 'smtp.hostinger.com';
 
     /**
      * SMTP Username
      */
-    public string $SMTPUser = '';
+    public string $SMTPUser = 'cs@optiontech.id';
 
     /**
      * SMTP Password
      */
-    public string $SMTPPass = '';
+    public string $SMTPPass = 'S$l=gy:ml6*Y';
 
     /**
      * SMTP Port
@@ -48,7 +48,7 @@ class Email extends BaseConfig
     /**
      * SMTP Timeout (in seconds)
      */
-    public int $SMTPTimeout = 5;
+    public int $SMTPTimeout = 60; // Increased timeout
 
     /**
      * Enable persistent SMTP connections
@@ -115,4 +115,36 @@ class Email extends BaseConfig
      * Enable notify message from server
      */
     public bool $DSN = false;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        // Override with environment variables if available
+        if (env('email.SMTPHost')) {
+            $this->SMTPHost = env('email.SMTPHost');
+        }
+        if (env('email.SMTPUser')) {
+            $this->SMTPUser = env('email.SMTPUser');
+        }
+        if (env('email.SMTPPass')) {
+            $this->SMTPPass = env('email.SMTPPass');
+        }
+        if (env('email.SMTPPort')) {
+            $this->SMTPPort = (int) env('email.SMTPPort');
+        }
+        if (env('email.SMTPCrypto')) {
+            $this->SMTPCrypto = env('email.SMTPCrypto');
+        }
+        if (env('email.protocol')) {
+            $this->protocol = env('email.protocol');
+        }
+        if (env('email.mailType')) {
+            $this->mailType = env('email.mailType');
+        }
+
+        // Set from email and name from environment or defaults
+        $this->fromEmail = env('email.SMTPUser') ?: 'cs@optiontech.id';
+        $this->fromName = env('app.siteName') ?: 'Computer Repair Shop';
+    }
 }

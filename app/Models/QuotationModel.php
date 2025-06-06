@@ -35,24 +35,25 @@ class QuotationModel extends Model
     }
 
     /**
-     * Calculate totals before save
+     * Calculate totals before save - FIXED VERSION
      */
     protected function calculateTotals(array $data): array
     {
         if (isset($data['data'])) {
             $quotation = $data['data'];
 
-            $serviceCost = $quotation['service_cost'] ?? 0;
-            $partsCost = $quotation['parts_cost'] ?? 0;
-            $additionalCost = $quotation['additional_cost'] ?? 0;
-            $discountAmount = $quotation['discount_amount'] ?? 0;
-            $discountPercentage = $quotation['discount_percentage'] ?? 0;
-            $taxPercentage = $quotation['tax_percentage'] ?? 0;
+            // Convert string values to float for calculation
+            $serviceCost = (float)($quotation['service_cost'] ?? 0);
+            $partsCost = (float)($quotation['parts_cost'] ?? 0);
+            $additionalCost = (float)($quotation['additional_cost'] ?? 0);
+            $discountAmount = (float)($quotation['discount_amount'] ?? 0);
+            $discountPercentage = (float)($quotation['discount_percentage'] ?? 0);
+            $taxPercentage = (float)($quotation['tax_percentage'] ?? 0);
 
             // Calculate subtotal
             $subtotal = $serviceCost + $partsCost + $additionalCost;
 
-            // Apply percentage discount if set
+            // Apply percentage discount if set (and override discount_amount)
             if ($discountPercentage > 0) {
                 $discountAmount = ($subtotal * $discountPercentage) / 100;
                 $data['data']['discount_amount'] = $discountAmount;
@@ -66,7 +67,13 @@ class QuotationModel extends Model
             $data['data']['tax_amount'] = $taxAmount;
 
             // Final total
-            $data['data']['total_cost'] = $afterDiscount + $taxAmount;
+            $totalCost = $afterDiscount + $taxAmount;
+            $data['data']['total_cost'] = $totalCost;
+
+            // Debug log untuk development
+            if (ENVIRONMENT === 'development') {
+                log_message('debug', 'Quotation calculation: service=' . $serviceCost . ', parts=' . $partsCost . ', additional=' . $additionalCost . ', total=' . $totalCost);
+            }
         }
 
         return $data;
@@ -199,7 +206,7 @@ class QuotationModel extends Model
     }
 
     /**
-     * Get quotation by ID with order details
+     * Get quotation by ID with order details - IMPROVED VERSION
      */
     public function getQuotationWithOrderDetails($id): ?array
     {
@@ -224,20 +231,25 @@ class QuotationModel extends Model
             ->where('quotations.id', $id)
             ->first();
 
+        // DEBUGGING: Log the raw result
+        if (ENVIRONMENT === 'development' && $result) {
+            log_message('debug', 'Raw quotation data: ' . print_r($result, true));
+        }
+
         return $result ? $result : null;
     }
 
     /**
-     * Calculate quotation totals
+     * Calculate quotation totals - MANUAL CALCULATION METHOD
      */
     public function calculateQuotationTotals($data): array
     {
-        $serviceCost = $data['service_cost'] ?? 0;
-        $partsCost = $data['parts_cost'] ?? 0;
-        $additionalCost = $data['additional_cost'] ?? 0;
-        $discountAmount = $data['discount_amount'] ?? 0;
-        $discountPercentage = $data['discount_percentage'] ?? 0;
-        $taxPercentage = $data['tax_percentage'] ?? 0;
+        $serviceCost = (float)($data['service_cost'] ?? 0);
+        $partsCost = (float)($data['parts_cost'] ?? 0);
+        $additionalCost = (float)($data['additional_cost'] ?? 0);
+        $discountAmount = (float)($data['discount_amount'] ?? 0);
+        $discountPercentage = (float)($data['discount_percentage'] ?? 0);
+        $taxPercentage = (float)($data['tax_percentage'] ?? 0);
 
         // Calculate subtotal
         $subtotal = $serviceCost + $partsCost + $additionalCost;
@@ -282,4 +294,5 @@ class QuotationModel extends Model
 
         return $this->insert($newData);
     }
+
 }
