@@ -1001,12 +1001,12 @@ class OrderController extends BaseController
 
         $quotationData = [
             'order_id' => $id,
-            'service_cost' => $this->request->getPost('service_cost'),
-            'parts_cost' => $this->request->getPost('parts_cost') ?: 0,
-            'additional_cost' => $this->request->getPost('additional_cost') ?: 0,
-            'discount_amount' => $this->request->getPost('discount_amount') ?: 0,
-            'discount_percentage' => $this->request->getPost('discount_percentage') ?: 0,
-            'tax_percentage' => $this->request->getPost('tax_percentage') ?: 0,
+            'service_cost' => (float)$this->request->getPost('service_cost'),
+            'parts_cost' => (float)($this->request->getPost('parts_cost') ?: 0),
+            'additional_cost' => (float)($this->request->getPost('additional_cost') ?: 0),
+            'discount_amount' => (float)($this->request->getPost('discount_amount') ?: 0),
+            'discount_percentage' => (float)($this->request->getPost('discount_percentage') ?: 0),
+            'tax_percentage' => (float)($this->request->getPost('tax_percentage') ?: 0),
             'estimated_duration' => $this->request->getPost('estimated_duration'),
             'warranty_period' => $this->request->getPost('warranty_period'),
             'terms_conditions' => $this->request->getPost('terms_conditions'),

@@ -42,7 +42,7 @@ class QuotationModel extends Model
         if (isset($data['data'])) {
             $quotation = $data['data'];
 
-            // Convert string values to float for calculation
+            // FIX: Pastikan konversi ke float
             $serviceCost = (float)($quotation['service_cost'] ?? 0);
             $partsCost = (float)($quotation['parts_cost'] ?? 0);
             $additionalCost = (float)($quotation['additional_cost'] ?? 0);
@@ -53,7 +53,7 @@ class QuotationModel extends Model
             // Calculate subtotal
             $subtotal = $serviceCost + $partsCost + $additionalCost;
 
-            // Apply percentage discount if set (and override discount_amount)
+            // Apply percentage discount if set
             if ($discountPercentage > 0) {
                 $discountAmount = ($subtotal * $discountPercentage) / 100;
                 $data['data']['discount_amount'] = $discountAmount;
@@ -67,13 +67,10 @@ class QuotationModel extends Model
             $data['data']['tax_amount'] = $taxAmount;
 
             // Final total
-            $totalCost = $afterDiscount + $taxAmount;
-            $data['data']['total_cost'] = $totalCost;
+            $data['data']['total_cost'] = $afterDiscount + $taxAmount;
 
-            // Debug log untuk development
-            if (ENVIRONMENT === 'development') {
-                log_message('debug', 'Quotation calculation: service=' . $serviceCost . ', parts=' . $partsCost . ', additional=' . $additionalCost . ', total=' . $totalCost);
-            }
+            // DEBUG: Uncomment untuk testing
+            // log_message('debug', 'Quotation calc: service='.$serviceCost.', total='.$data['data']['total_cost']);
         }
 
         return $data;
