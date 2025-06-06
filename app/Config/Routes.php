@@ -9,6 +9,17 @@ use CodeIgniter\Router\RouteCollection;
 // Default route
 $routes->get('/', 'Frontend\HomeController::index');
 
+// PUBLIC QUOTATION ROUTES (Before admin group)
+$routes->group('quotation', function($routes) {
+    $routes->get('(:num)', 'QuotationController::view/$1');
+    $routes->get('(:num)/approve', 'QuotationController::approve/$1');
+    $routes->post('(:num)/approve', 'QuotationController::approve/$1');
+    $routes->get('(:num)/reject', 'QuotationController::reject/$1');
+    $routes->post('(:num)/reject', 'QuotationController::reject/$1');
+    $routes->get('(:num)/pdf', 'QuotationController::downloadPdf/$1');
+    $routes->get('(:num)/status', 'QuotationController::checkStatus/$1'); // AJAX endpoint
+});
+
 // Admin routes
 $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($routes) {
     // Auth routes (tidak pakai filter auth)
@@ -40,7 +51,7 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->post('orders/(:num)/diagnosis', 'OrderController::saveDiagnosis/$1');
         $routes->get('orders/(:num)/start-diagnosis', 'OrderController::startDiagnosis/$1');
 
-        // Quotation routes
+        // Quotation routes - UPDATED
         $routes->get('orders/(:num)/create-quotation', 'OrderController::createQuotation/$1');
         $routes->post('orders/(:num)/quotation', 'OrderController::saveQuotation/$1');
         $routes->get('orders/(:num)/quotation', 'OrderController::showQuotation/$1');
@@ -186,12 +197,4 @@ $routes->group('', ['namespace' => 'App\Controllers\Frontend'], function($routes
     $routes->get('contact', 'ContactController::index');
     $routes->post('contact', 'ContactController::send');
     $routes->get('(:segment)', 'PageController::show/$1'); // CMS pages
-});
-
-// Public quotation approval routes (outside admin group)
-$routes->group('', function($routes) {
-    $routes->get('quotation/(:num)/approve', 'OrderController::approveQuotation/$1');
-    $routes->post('quotation/(:num)/approve', 'OrderController::approveQuotation/$1');
-    $routes->get('quotation/(:num)/reject', 'OrderController::rejectQuotation/$1');
-    $routes->post('quotation/(:num)/reject', 'OrderController::rejectQuotation/$1');
 });

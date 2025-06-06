@@ -315,6 +315,9 @@ class OrderController extends BaseController
         return view('admin/orders/update_status', $data);
     }
 
+    /**
+     * IMPROVED: Update status with better validation
+     */
     public function saveStatus($id): RedirectResponse
     {
         $order = $this->orderModel->find($id);
@@ -326,16 +329,21 @@ class OrderController extends BaseController
         $newStatus = $this->request->getPost('status');
         $notes = $this->request->getPost('notes');
 
+        // IMPROVED: Validate workflow
+        $errors = $this->validateQuotationWorkflow($id, $newStatus);
+        if (!empty($errors)) {
+            return redirect()->back()->with('error', implode('. ', $errors));
+        }
+
         // Log status change
         $historyModel = new OrderStatusHistoryModel();
-        $historyModel->insert([
-            'order_id' => $id,
-            'old_status' => $order['status'],
-            'new_status' => $newStatus,
-            'notes' => $notes,
-            'changed_by' => session()->get('user_id'),
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
+        $historyModel->addStatusChange(
+            $id,
+            $order['status'],
+            $newStatus,
+            $notes,
+            session()->get('user_id')
+        );
 
         $updateData = [
             'status' => $newStatus,
@@ -343,15 +351,62 @@ class OrderController extends BaseController
         ];
 
         // Set completion time if status is completed
-        if ($newStatus === 'completed') {
+        if ($newStatus === 'completed' && !$order['completed_at']) {
             $updateData['completed_at'] = date('Y-m-d H:i:s');
         }
 
+        // IMPROVED: Handle quotation-related status changes
+        if ($newStatus === 'in_progress') {
+            $quotation = $this->quotationModel->getQuotationByOrder($id);
+            if ($quotation && $quotation['status'] === 'approved') {
+                // Set final cost from approved quotation
+                $updateData['final_cost'] = $quotation['total_cost'];
+            }
+        }
+
         if ($this->orderModel->update($id, $updateData)) {
+            // IMPROVED: Send notifications based on status
+            $this->sendStatusUpdateNotification($order, $newStatus, $notes);
+
             return redirect()->to("/admin/orders/{$id}")->with('success', 'Status updated successfully');
         }
 
         return redirect()->back()->with('error', 'Failed to update status');
+    }
+
+    /**
+     * NEW: Send status update notifications
+     */
+    private function sendStatusUpdateNotification($order, $newStatus, $notes): bool
+    {
+        // Get customer email
+        $customerData = $this->customerModel->find($order['customer_id']);
+        if (!$customerData || !$customerData['email']) {
+            return false;
+        }
+
+        // Determine if this status change should trigger notification
+        $notifyStatuses = ['diagnosed', 'waiting_approval', 'in_progress', 'waiting_parts', 'completed', 'delivered'];
+
+        if (!in_array($newStatus, $notifyStatuses)) {
+            return false;
+        }
+
+        $email = \Config\Services::email();
+
+        $subject = "Order Status Update - {$order['order_number']}";
+        $message = view('emails/order_status_update', [
+            'order' => $order,
+            'new_status' => $newStatus,
+            'notes' => $notes,
+            'customer' => $customerData
+        ]);
+
+        $email->setTo($customerData['email']);
+        $email->setSubject($subject);
+        $email->setMessage($message);
+
+        return $email->send();
     }
 
     public function delete($id): RedirectResponse
@@ -864,7 +919,7 @@ class OrderController extends BaseController
     }
 
     /**
-     * Create quotation from diagnosis
+     * IMPROVED: Create quotation with better validation
      */
     public function createQuotation($id): string
     {
@@ -874,14 +929,24 @@ class OrderController extends BaseController
             throw new PageNotFoundException('Order not found');
         }
 
-        // Check if order has been diagnosed
-        if ($order['diagnosis_status'] !== 'completed') {
+        // IMPROVED: Check if order can have quotation
+        if (!in_array($order['status'], ['diagnosed', 'waiting_approval'])) {
             return redirect()->to("/admin/orders/{$id}")
-                ->with('error', 'Order must be diagnosed before creating quotation');
+                ->with('error', 'Order must be diagnosed before creating quotation. Current status: ' . ucfirst($order['status']));
+        }
+
+        // IMPROVED: Check diagnosis completion
+        if (empty($order['diagnosis_notes']) && empty($order['recommended_actions'])) {
+            return redirect()->to("/admin/orders/{$id}/diagnosis")
+                ->with('error', 'Please complete diagnosis before creating quotation');
         }
 
         // Check if quotation already exists
         $existingQuotation = $this->quotationModel->getQuotationByOrder($id);
+
+        // IMPROVED: Get order parts for auto-calculation
+        $orderParts = $this->orderPartModel->getOrderParts($id);
+        $autoPartsTotal = array_sum(array_column($orderParts, 'total_price'));
 
         $data = [
             'title' => 'Create Quotation',
@@ -890,14 +955,15 @@ class OrderController extends BaseController
             'default_tax_rate' => get_site_setting('tax_rate', 0),
             'default_warranty' => get_site_setting('default_warranty', '30 days'),
             'service_rates' => $this->getServiceRates($order['device_type_id']),
-            'order_parts' => $this->orderPartModel->getOrderParts($id)
+            'order_parts' => $orderParts,
+            'auto_parts_total' => $autoPartsTotal // NEW: Pass auto-calculated total
         ];
 
         return view('admin/orders/create_quotation', $data);
     }
 
     /**
-     * Save quotation
+     * IMPROVED: Save quotation with better validation and workflow
      */
     public function saveQuotation($id)
     {
@@ -907,16 +973,27 @@ class OrderController extends BaseController
             throw new PageNotFoundException('Order not found');
         }
 
+        // IMPROVED: Validate order status
+        if (!in_array($order['status'], ['diagnosed', 'waiting_approval'])) {
+            return redirect()->back()->with('error', 'Cannot create quotation for order in current status: ' . ucfirst($order['status']));
+        }
+
         $rules = [
-            'service_cost' => 'required|decimal',
+            'service_cost' => 'required|decimal|greater_than[0]',
             'parts_cost' => 'permit_empty|decimal',
-            'total_cost' => 'required|decimal',
-            'estimated_duration' => 'required',
+            'total_cost' => 'required|decimal|greater_than[0]',
+            'estimated_duration' => 'required|min_length[3]',
             'valid_until' => 'required|valid_date'
         ];
 
         if (!$this->validate($rules)) {
             return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // IMPROVED: Validate valid_until date
+        $validUntil = $this->request->getPost('valid_until');
+        if (strtotime($validUntil) <= time()) {
+            return redirect()->back()->withInput()->with('error', 'Valid until date must be in the future');
         }
 
         // Check if quotation already exists
@@ -934,46 +1011,75 @@ class OrderController extends BaseController
             'warranty_period' => $this->request->getPost('warranty_period'),
             'terms_conditions' => $this->request->getPost('terms_conditions'),
             'internal_notes' => $this->request->getPost('internal_notes'),
-            'valid_until' => $this->request->getPost('valid_until'),
-            'created_by' => session()->get('user_id')
+            'valid_until' => $validUntil,
+            'created_by' => session()->get('user_id'),
+            'status' => 'draft' // Always start as draft
         ];
 
         if ($existingQuotation) {
             // Update existing quotation
             $quotationId = $existingQuotation['id'];
             $result = $this->quotationModel->update($quotationId, $quotationData);
+            $message = 'Quotation updated successfully';
         } else {
             // Create new quotation
             $quotationId = $this->quotationModel->insert($quotationData);
             $result = $quotationId ? true : false;
+            $message = 'Quotation created successfully';
         }
 
         if ($result) {
-            // Update order status to waiting_approval
-            $this->orderModel->update($id, [
-                'status' => 'waiting_approval',
-                'estimated_cost' => $quotationData['service_cost'] + $quotationData['parts_cost'] + $quotationData['additional_cost'],
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
-
-            // Log status change
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
-                $id,
-                $order['status'],
-                'waiting_approval',
-                'Quotation created and waiting for customer approval',
-                session()->get('user_id')
-            );
+            // IMPROVED: Only update order status if not already waiting_approval
+            if ($order['status'] !== 'waiting_approval') {
+                $this->orderModel->update($id, [
+                    'estimated_cost' => $quotationData['service_cost'] + $quotationData['parts_cost'] + $quotationData['additional_cost'],
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
 
             // Check if should send quotation immediately
             if ($this->request->getPost('send_immediately')) {
-                return redirect()->to("/admin/orders/{$id}/quotation/{$quotationId}/send")
-                    ->with('success', 'Quotation created successfully. Prepare to send to customer.');
+                // Mark as sent and send email
+                $this->quotationModel->markAsSent($quotationId);
+
+                $quotationDetails = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
+                if ($quotationDetails['customer_email']) {
+                    $email = \Config\Services::email();
+                    $subject = "Repair Quotation - Order #{$quotationDetails['order_number']}";
+                    $emailMessage = view('emails/quotation', ['quotation' => $quotationDetails]);
+
+                    $email->setTo($quotationDetails['customer_email']);
+                    $email->setSubject($subject);
+                    $email->setMessage($emailMessage);
+
+                    if ($email->send()) {
+                        // Update order status to waiting_approval
+                        $this->orderModel->update($id, [
+                            'status' => 'waiting_approval',
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+
+                        // Log status change
+                        $historyModel = new OrderStatusHistoryModel();
+                        $historyModel->addStatusChange(
+                            $id,
+                            $order['status'],
+                            'waiting_approval',
+                            'Quotation created and sent to customer for approval',
+                            session()->get('user_id')
+                        );
+
+                        $message .= ' and sent to customer';
+                    } else {
+                        $message .= ' but failed to send email';
+                    }
+                } else {
+                    $message .= ' but customer email not available';
+                }
             }
 
-            return redirect()->to("/admin/orders/{$id}/quotation")
-                ->with('success', 'Quotation created successfully');
+            return redirect()->to("/admin/orders/{$id}")
+                ->with('success', $message);
         }
 
         return redirect()->back()->with('error', 'Failed to save quotation');
@@ -982,29 +1088,38 @@ class OrderController extends BaseController
     /**
      * Show quotation
      */
-    public function showQuotation($id): string
+    public function showQuotation($orderId): string
     {
-        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
+        // 1. Cari quotation yang terkait dengan order tersebut
+        $existingQuotation = $this->quotationModel->getQuotationByOrder($orderId);
 
-        if (!$quotation) {
-            throw new PageNotFoundException('Quotation not found');
+        if (! $existingQuotation) {
+            throw new PageNotFoundException('Quotation not found for this order');
+        }
+
+        // 2. Sekarang panggil detail lengkap berdasarkan quotation_id
+        $quotationWithDetails = $this->quotationModel->getQuotationWithOrderDetails($existingQuotation['id']);
+
+        if (! $quotationWithDetails) {
+            throw new PageNotFoundException('Quotation details not found');
         }
 
         $data = [
-            'title' => 'Quotation Details',
-            'quotation' => $quotation,
-            'order_parts' => $this->orderPartModel->getOrderParts($quotation['order_id']),
-            'print_mode' => $this->request->getGet('print') === '1',
-            'shop_info' => [
-                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
+            'title'       => 'Quotation Details',
+            'quotation'   => $quotationWithDetails,
+            'order_parts' => $this->orderPartModel->getOrderParts($quotationWithDetails['order_id']),
+            'print_mode'  => $this->request->getGet('print') === '1',
+            'shop_info'   => [
+                'name'    => get_site_setting('site_name', 'Computer Repair Shop'),
                 'address' => get_site_setting('address', ''),
-                'phone' => get_site_setting('contact_phone', ''),
-                'email' => get_site_setting('contact_email', ''),
-            ]
+                'phone'   => get_site_setting('contact_phone', ''),
+                'email'   => get_site_setting('contact_email', ''),
+            ],
         ];
 
         return view('admin/orders/quotation_pdf', $data);
     }
+
 
     /**
      * Show quotation by quotation ID
@@ -1036,7 +1151,7 @@ class OrderController extends BaseController
     /**
      * Send quotation to customer
      */
-    public function sendQuotation($orderId, $quotationId)
+    public function sendQuotation($orderId, $quotationId): RedirectResponse
     {
         $quotation = $this->quotationModel->find($quotationId);
 
@@ -1045,7 +1160,7 @@ class OrderController extends BaseController
         }
 
         // Get complete quotation data with order details
-        $quotationWithDetails = $this->quotationModel->getQuotationByOrder($orderId);
+        $quotationWithDetails = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
 
         if (!$quotationWithDetails['customer_email']) {
             return redirect()->back()->with('error', 'Customer email not available');
@@ -1064,6 +1179,24 @@ class OrderController extends BaseController
         if ($email->send()) {
             // Mark quotation as sent
             $this->quotationModel->markAsSent($quotationId);
+
+            // Update order status to waiting_approval if not already
+            if ($quotationWithDetails['order_status'] !== 'waiting_approval') {
+                $this->orderModel->update($orderId, [
+                    'status' => 'waiting_approval',
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+
+                // Log status change
+                $historyModel = new OrderStatusHistoryModel();
+                $historyModel->addStatusChange(
+                    $orderId,
+                    $quotationWithDetails['order_status'],
+                    'waiting_approval',
+                    'Quotation sent to customer for approval',
+                    session()->get('user_id')
+                );
+            }
 
             return redirect()->back()->with('success', 'Quotation sent to customer successfully');
         }
@@ -1205,7 +1338,7 @@ class OrderController extends BaseController
     }
 
     /**
-     * Get service rates for device type
+     * IMPROVED: Get service rates with fallback
      */
     private function getServiceRates($deviceTypeId): array
     {
@@ -1217,28 +1350,102 @@ class OrderController extends BaseController
                 'hardware_repair' => 150000,
                 'screen_replacement' => 200000,
                 'keyboard_replacement' => 80000,
-                'battery_replacement' => 120000
+                'battery_replacement' => 120000,
+                'motherboard_repair' => 300000,
+                'data_recovery' => 150000
             ],
             2 => [ // Desktop
                 'diagnosis' => 50000,
                 'software_repair' => 80000,
                 'hardware_repair' => 120000,
                 'component_replacement' => 100000,
-                'system_upgrade' => 150000
+                'system_upgrade' => 150000,
+                'virus_removal' => 75000,
+                'data_recovery' => 150000,
+                'custom_build' => 200000
             ],
             3 => [ // Phone
                 'diagnosis' => 30000,
                 'software_repair' => 80000,
                 'screen_replacement' => 250000,
                 'battery_replacement' => 150000,
-                'charging_port_repair' => 100000
+                'charging_port_repair' => 100000,
+                'camera_repair' => 120000,
+                'speaker_repair' => 80000,
+                'water_damage_repair' => 200000
+            ],
+            4 => [ // Tablet
+                'diagnosis' => 40000,
+                'software_repair' => 90000,
+                'screen_replacement' => 300000,
+                'battery_replacement' => 180000,
+                'charging_port_repair' => 120000,
+                'button_repair' => 80000
             ]
         ];
 
-        return $serviceRates[$deviceTypeId] ?? [
+        // Fallback rates for unknown device types
+        $defaultRates = [
             'diagnosis' => 50000,
             'basic_repair' => 100000,
-            'advanced_repair' => 200000
+            'advanced_repair' => 200000,
+            'component_replacement' => 150000,
+            'software_service' => 80000,
+            'emergency_service' => 300000
         ];
+
+        return $serviceRates[$deviceTypeId] ?? $defaultRates;
+    }
+
+    /**
+     * NEW: Method to validate quotation workflow
+     */
+    private function validateQuotationWorkflow($orderId, $newStatus): array
+    {
+        $order = $this->orderModel->find($orderId);
+        $errors = [];
+
+        if (!$order) {
+            $errors[] = 'Order not found';
+            return $errors;
+        }
+
+        // Validate status transitions
+        $validTransitions = [
+            'received' => ['diagnosed'],
+            'diagnosed' => ['waiting_approval', 'in_progress'], // Allow direct to in_progress
+            'waiting_approval' => ['in_progress', 'diagnosed'], // Can go back to diagnosed
+            'in_progress' => ['waiting_parts', 'completed'],
+            'waiting_parts' => ['in_progress'],
+            'completed' => ['delivered'],
+            'delivered' => [],
+            'cancelled' => []
+        ];
+
+        $currentStatus = $order['status'];
+        $allowedStatuses = $validTransitions[$currentStatus] ?? [];
+
+        if (!in_array($newStatus, $allowedStatuses)) {
+            $errors[] = "Cannot change status from '{$currentStatus}' to '{$newStatus}'";
+        }
+
+        // Specific validations for quotation-related statuses
+        if ($newStatus === 'waiting_approval') {
+            $quotation = $this->quotationModel->getQuotationByOrder($orderId);
+            if (!$quotation) {
+                $errors[] = 'Cannot set status to waiting_approval without a quotation';
+            } elseif ($quotation['status'] !== 'sent') {
+                $errors[] = 'Quotation must be sent before waiting for approval';
+            }
+        }
+
+        if ($newStatus === 'in_progress') {
+            $quotation = $this->quotationModel->getQuotationByOrder($orderId);
+            if ($quotation && $quotation['status'] === 'sent') {
+                $errors[] = 'Cannot start work while quotation is still pending customer approval';
+            }
+        }
+
+        return $errors;
     }
 }

@@ -21,6 +21,209 @@
             </div>
         </div>
 
+        <!-- WORKFLOW PROGRESS BAR -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Order Progress</h3>
+
+            <?php
+            $currentStatus = $order['status'];
+            $steps = [
+                'received' => ['label' => 'Received', 'icon' => 'inbox', 'description' => 'Device received'],
+                'diagnosed' => ['label' => 'Diagnosed', 'icon' => 'search', 'description' => 'Diagnosis completed'],
+                'waiting_approval' => ['label' => 'Quotation Sent', 'icon' => 'file-invoice-dollar', 'description' => 'Awaiting customer approval'],
+                'in_progress' => ['label' => 'In Progress', 'icon' => 'wrench', 'description' => 'Repair work ongoing'],
+                'completed' => ['label' => 'Completed', 'icon' => 'check-circle', 'description' => 'Ready for pickup'],
+                'delivered' => ['label' => 'Delivered', 'icon' => 'truck', 'description' => 'Delivered to customer']
+            ];
+
+            $statusOrder = array_keys($steps);
+            $currentIndex = array_search($currentStatus, $statusOrder);
+            ?>
+
+            <div class="flex items-center justify-between">
+                <?php foreach ($steps as $status => $step):
+                    $stepIndex = array_search($status, $statusOrder);
+                    $isCompleted = $stepIndex <= $currentIndex;
+                    $isCurrent = $status === $currentStatus;
+                    ?>
+                    <div class="flex flex-col items-center flex-1">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center mb-2 <?= $isCompleted ? 'bg-green-500 text-white' : ($isCurrent ? 'bg-blue-500 text-white' : 'bg-gray-300 text-gray-600') ?>">
+                            <i class="fas fa-<?= $step['icon'] ?> text-sm"></i>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-sm font-medium <?= $isCurrent ? 'text-blue-600' : ($isCompleted ? 'text-green-600' : 'text-gray-500') ?>">
+                                <?= $step['label'] ?>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1"><?= $step['description'] ?></div>
+                        </div>
+                    </div>
+
+                    <?php if ($stepIndex < count($steps) - 1): ?>
+                    <div class="w-12 h-0.5 <?= $stepIndex < $currentIndex ? 'bg-green-500' : 'bg-gray-300' ?> mx-2"></div>
+                <?php endif; ?>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <!-- WORKFLOW ACTION CARDS -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- DIAGNOSIS CARD -->
+            <?php if ($order['status'] === 'received'): ?>
+                <div class="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl p-6">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center mr-4">
+                            <i class="fas fa-stethoscope text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-blue-900">Next: Device Diagnosis</h3>
+                            <p class="text-blue-700 text-sm">Examine device and identify issues</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <a href="/admin/orders/<?= $order['id'] ?>/diagnosis"
+                           class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center block font-medium">
+                            <i class="fas fa-play mr-2"></i>Start Diagnosis
+                        </a>
+                        <p class="text-xs text-blue-600">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Complete diagnosis to proceed with quotation
+                        </p>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- QUOTATION CARD -->
+            <?php if ($order['status'] === 'diagnosed'): ?>
+                <div class="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-200 rounded-xl p-6">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center mr-4">
+                            <i class="fas fa-file-invoice-dollar text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-green-900">Ready: Create Quotation</h3>
+                            <p class="text-green-700 text-sm">Device diagnosed, ready for cost estimate</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <?php
+                        // Check if quotation already exists
+                        $quotationModel = new \App\Models\QuotationModel();
+                        $existingQuotation = $quotationModel->getQuotationByOrder($order['id']);
+                        ?>
+
+                        <?php if ($existingQuotation): ?>
+                            <a href="/admin/orders/<?= $order['id'] ?>/quotation"
+                               class="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors text-center block font-medium">
+                                <i class="fas fa-eye mr-2"></i>View Quotation
+                            </a>
+                            <a href="/admin/orders/<?= $order['id'] ?>/quotation/edit"
+                               class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center block text-sm">
+                                <i class="fas fa-edit mr-2"></i>Edit Quotation
+                            </a>
+                            <?php if ($existingQuotation['status'] === 'draft'): ?>
+                                <button onclick="sendQuotation(<?= $existingQuotation['id'] ?>)"
+                                        class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors text-center block text-sm">
+                                    <i class="fas fa-paper-plane mr-2"></i>Send to Customer
+                                </button>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <a href="/admin/orders/<?= $order['id'] ?>/create-quotation"
+                               class="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors text-center block font-medium">
+                                <i class="fas fa-plus mr-2"></i>Create Quotation
+                            </a>
+                        <?php endif; ?>
+
+                        <p class="text-xs text-green-600">
+                            <i class="fas fa-lightbulb mr-1"></i>
+                            Diagnosis completed ✓ Ready for quotation
+                        </p>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- WAITING APPROVAL CARD -->
+            <?php if ($order['status'] === 'waiting_approval'): ?>
+                <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 border-2 border-yellow-200 rounded-xl p-6">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-yellow-500 rounded-full flex items-center justify-center mr-4">
+                            <i class="fas fa-clock text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-yellow-900">Waiting: Customer Approval</h3>
+                            <p class="text-yellow-700 text-sm">Quotation sent, awaiting response</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <?php
+                        $quotationModel = new \App\Models\QuotationModel();
+                        $quotation = $quotationModel->getQuotationByOrder($order['id']);
+                        ?>
+
+                        <a href="/admin/orders/<?= $order['id'] ?>/quotation"
+                           class="w-full bg-yellow-600 text-white py-3 px-4 rounded-lg hover:bg-yellow-700 transition-colors text-center block font-medium">
+                            <i class="fas fa-eye mr-2"></i>View Sent Quotation
+                        </a>
+
+                        <?php if ($quotation): ?>
+                            <button onclick="sendReminder(<?= $quotation['id'] ?>)"
+                                    class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors text-center block text-sm">
+                                <i class="fas fa-bell mr-2"></i>Send Reminder
+                            </button>
+
+                            <div class="text-xs text-yellow-700 bg-yellow-50 p-2 rounded">
+                                <p><strong>Sent:</strong> <?= date('M d, Y H:i', strtotime($quotation['sent_at'])) ?></p>
+                                <p><strong>Valid until:</strong> <?= date('M d, Y', strtotime($quotation['valid_until'])) ?></p>
+                                <?php if (strtotime($quotation['valid_until']) < time()): ?>
+                                    <p class="text-red-600 font-medium">⚠️ EXPIRED</p>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- IN PROGRESS CARD -->
+            <?php if ($order['status'] === 'in_progress'): ?>
+                <div class="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200 rounded-xl p-6">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center mr-4">
+                            <i class="fas fa-wrench text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-purple-900">Active: Repair in Progress</h3>
+                            <p class="text-purple-700 text-sm">Customer approved, work ongoing</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <a href="/admin/orders/<?= $order['id'] ?>/status"
+                           class="w-full bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors text-center block font-medium">
+                            <i class="fas fa-sync mr-2"></i>Update Progress
+                        </a>
+
+                        <a href="/admin/orders/<?= $order['id'] ?>/manage-parts"
+                           class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center block text-sm">
+                            <i class="fas fa-cogs mr-2"></i>Manage Parts
+                        </a>
+
+                        <?php if ($order['final_cost']): ?>
+                            <div class="text-xs text-purple-700 bg-purple-50 p-2 rounded">
+                                <p><strong>Approved Amount:</strong> <?= format_currency($order['final_cost']) ?></p>
+                                <?php if ($order['technician_name']): ?>
+                                    <p><strong>Technician:</strong> <?= $order['technician_name'] ?></p>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- REST OF ORIGINAL CONTENT (Device Info, Customer Info, etc.) -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- Order Information -->
             <div class="lg:col-span-2 space-y-6">
@@ -78,6 +281,47 @@
                     </div>
                 </div>
 
+                <!-- DIAGNOSIS INFORMATION (if available) -->
+                <?php if (!empty($order['diagnosis_notes']) || !empty($order['recommended_actions'])): ?>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Diagnosis Information</h3>
+
+                        <?php if (!empty($order['diagnosis_notes'])): ?>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-600">Diagnosis Notes</label>
+                                <div class="bg-gray-50 p-3 rounded-lg mt-1">
+                                    <p class="text-gray-900"><?= nl2br($order['diagnosis_notes']) ?></p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($order['recommended_actions'])): ?>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-600">Recommended Actions</label>
+                                <div class="bg-blue-50 p-3 rounded-lg mt-1">
+                                    <p class="text-gray-900"><?= nl2br($order['recommended_actions']) ?></p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <?php if (!empty($order['estimated_hours'])): ?>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-600">Estimated Hours</label>
+                                    <p class="text-gray-900"><?= $order['estimated_hours'] ?> hours</p>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if (!empty($order['diagnosis_date'])): ?>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-600">Diagnosis Date</label>
+                                    <p class="text-gray-900"><?= date('M d, Y', strtotime($order['diagnosis_date'])) ?></p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
                 <!-- Parts Used -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200">
                     <div class="p-6 border-b border-gray-200">
@@ -97,7 +341,6 @@
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
@@ -122,19 +365,7 @@
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                             <?= format_currency($part['total_price']) ?>
                                         </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button onclick="removePart(<?= $part['id'] ?>)" class="text-red-600 hover:text-red-900">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </td>
                                     </tr>
-                                    <?php if ($part['notes']): ?>
-                                    <tr class="bg-gray-50">
-                                        <td colspan="5" class="px-6 py-2 text-sm text-gray-600 italic">
-                                            <i class="fas fa-comment-alt mr-2"></i><?= $part['notes'] ?>
-                                        </td>
-                                    </tr>
-                                <?php endif; ?>
                                 <?php endforeach; ?>
                                 </tbody>
                                 <tfoot class="bg-gray-50">
@@ -145,7 +376,6 @@
                                     <td class="px-6 py-4 text-sm font-bold text-gray-900">
                                         <?= format_currency($totalPartsPrice) ?>
                                     </td>
-                                    <td></td>
                                 </tr>
                                 </tfoot>
                             </table>
@@ -161,67 +391,6 @@
                         <?php endif; ?>
                     </div>
                 </div>
-
-                <!-- Stock Movements Related to This Order -->
-                <?php if (!empty($stock_movements)): ?>
-                    <div class="bg-white rounded-xl shadow-sm border border-gray-200">
-                        <div class="p-6 border-b border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-800">Stock Movements</h3>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-                                </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                <?php foreach ($stock_movements as $movement): ?>
-                                    <tr class="hover:bg-gray-50">
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <?= date('M d, Y H:i', strtotime($movement['created_at'])) ?>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div>
-                                                <div class="text-sm font-medium text-gray-900"><?= $movement['part_name'] ?></div>
-                                                <div class="text-sm text-gray-500"><?= $movement['part_number'] ?></div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <?php
-                                            $typeColors = [
-                                                'add' => 'bg-green-100 text-green-800',
-                                                'subtract' => 'bg-red-100 text-red-800',
-                                                'use' => 'bg-orange-100 text-orange-800',
-                                                'return' => 'bg-purple-100 text-purple-800'
-                                            ];
-                                            $color = $typeColors[$movement['movement_type']] ?? 'bg-gray-100 text-gray-800';
-                                            ?>
-                                            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full <?= $color ?>">
-                                                <?= ucfirst($movement['movement_type']) ?>
-                                            </span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <?php if (in_array($movement['movement_type'], ['add', 'return'])): ?>
-                                                <span class="text-green-600">+<?= $movement['quantity_change'] ?></span>
-                                            <?php else: ?>
-                                                <span class="text-red-600">-<?= $movement['quantity_change'] ?></span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <?= format_currency($movement['total_cost']) ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                <?php endif; ?>
             </div>
 
             <!-- Sidebar -->
@@ -328,11 +497,6 @@
                             <i class="fas fa-print mr-2"></i>Print Order
                         </button>
 
-                        <button onclick="deleteOrder()"
-                                class="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors">
-                            <i class="fas fa-trash mr-2"></i>Delete Order
-                        </button>
-
                         <a href="/admin/orders/<?= $order['id'] ?>/receipt"
                            class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors text-center block">
                             <i class="fas fa-receipt mr-2"></i>Service Receipt
@@ -351,26 +515,6 @@
                                 <i class="fas fa-envelope mr-2"></i>Email Receipt
                             </button>
                         <?php endif; ?>
-
-                        <!-- Diagnosis Actions -->
-                        <?php if (in_array($order['status'], ['received', 'diagnosed'])): ?>
-                            <?php if (($order['diagnosis_status'] ?? 'pending') === 'pending'): ?>
-                                <a href="/admin/orders/<?= $order['id'] ?>/start-diagnosis"
-                                   class="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition-colors text-center block">
-                                    <i class="fas fa-play mr-2"></i>Start Diagnosis
-                                </a>
-                            <?php elseif ($order['diagnosis_status'] === 'in_progress'): ?>
-                                <a href="/admin/orders/<?= $order['id'] ?>/diagnosis"
-                                   class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-center block">
-                                    <i class="fas fa-stethoscope mr-2"></i>Continue Diagnosis
-                                </a>
-                            <?php else: ?>
-                                <a href="/admin/orders/<?= $order['id'] ?>/diagnosis"
-                                   class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-center block">
-                                    <i class="fas fa-eye mr-2"></i>View Diagnosis
-                                </a>
-                            <?php endif; ?>
-                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -388,130 +532,36 @@
     </div>
 
     <script>
-        function removePart(orderPartId) {
-            if (confirm('Are you sure you want to remove this part from the order? Stock will be restored.')) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = `/admin/orders/<?= $order['id'] ?>/parts/${orderPartId}/remove`;
-                form.innerHTML = `
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="_method" value="DELETE">
-                `;
-                document.body.appendChild(form);
-                form.submit();
-            }
-        }
-
         function printOrder() {
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(`
-                <html>
-                <head>
-                    <title>Order #<?= $order['order_number'] ?></title>
-                    <style>
-                        body { font-family: Arial, sans-serif; padding: 20px; }
-                        .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
-                        .section { margin: 20px 0; }
-                        .label { font-weight: bold; }
-                        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-                        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                        th { background-color: #f2f2f2; }
-                        .total { font-weight: bold; background-color: #f9f9f9; }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>Repair Order #<?= $order['order_number'] ?></h1>
-                        <p>Date: <?= date('M d, Y H:i', strtotime($order['created_at'])) ?></p>
-                        <p>Status: <?= ucfirst(str_replace('_', ' ', $order['status'])) ?></p>
-                    </div>
-
-                    <div class="section">
-                        <h3>Customer Information</h3>
-                        <p><span class="label">Name:</span> <?= $order['customer_name'] ?></p>
-                        <p><span class="label">Phone:</span> <?= $order['customer_phone'] ?></p>
-                        <?php if ($order['customer_email']): ?>
-                        <p><span class="label">Email:</span> <?= $order['customer_email'] ?></p>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="section">
-                        <h3>Device Information</h3>
-                        <p><span class="label">Type:</span> <?= $order['device_type_name'] ?></p>
-                        <p><span class="label">Brand:</span> <?= $order['device_brand'] ?></p>
-                        <p><span class="label">Model:</span> <?= $order['device_model'] ?></p>
-                        <?php if ($order['device_serial']): ?>
-                        <p><span class="label">Serial:</span> <?= $order['device_serial'] ?></p>
-                        <?php endif; ?>
-                        <p><span class="label">Problem:</span> <?= $order['problem_description'] ?></p>
-                    </div>
-
-                    <?php if (!empty($order_parts)): ?>
-                    <div class="section">
-                        <h3>Parts Used</h3>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Part</th>
-                                    <th>Quantity</th>
-                                    <th>Unit Price</th>
-                                    <th>Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($order_parts as $part): ?>
-                                <tr>
-                                    <td><?= $part['part_name'] ?> (<?= $part['part_number'] ?>)</td>
-                                    <td><?= $part['quantity'] ?></td>
-                                    <td><?= format_currency($part['unit_price']) ?></td>
-                                    <td><?= format_currency($part['total_price']) ?></td>
-                                </tr>
-                                <?php endforeach; ?>
-                                <tr class="total">
-                                    <td colspan="3">Total Parts Cost</td>
-                                    <td><?= format_currency($totalPartsPrice ?? 0) ?></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <?php endif; ?>
-
-                    <?php if ($order['final_cost'] > 0): ?>
-                    <div class="section">
-                        <h3>Final Cost: <?= format_currency($order['final_cost']) ?></h3>
-                    </div>
-                    <?php endif; ?>
-
-                    <?php if ($order['notes']): ?>
-                    <div class="section">
-                        <h3>Notes</h3>
-                        <p><?= nl2br($order['notes']) ?></p>
-                    </div>
-                    <?php endif; ?>
-                </body>
-                </html>
-            `);
-            printWindow.document.close();
-            printWindow.print();
-        }
-
-        function deleteOrder() {
-            if (confirm('Are you sure you want to delete this order? This action cannot be undone.')) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = '/admin/orders/<?= $order['id'] ?>';
-                form.innerHTML = `
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="_method" value="DELETE">
-                `;
-                document.body.appendChild(form);
-                form.submit();
-            }
+            window.open('/admin/orders/<?= $order['id'] ?>/receipt?print=1', '_blank');
         }
 
         function emailReceipt(orderId) {
             if (confirm('Send service receipt to customer email?')) {
                 window.location.href = `/admin/orders/${orderId}/email-receipt`;
+            }
+        }
+
+        function sendQuotation(quotationId) {
+            if (confirm('Send quotation to customer via email?')) {
+                window.location.href = `/admin/orders/<?= $order['id'] ?>/quotation/${quotationId}/send`;
+            }
+        }
+
+        function sendReminder(quotationId) {
+            if (confirm('Send reminder email to customer?')) {
+                fetch(`/admin/quotations/${quotationId}/send-reminder`)
+                    .then(response => {
+                        if (response.ok) {
+                            alert('Reminder sent successfully!');
+                            location.reload();
+                        } else {
+                            alert('Failed to send reminder');
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error sending reminder');
+                    });
             }
         }
 
@@ -533,6 +583,19 @@
                 }
             }
 
+            // Q for quotation (if applicable)
+            if (e.key === 'q' && !e.ctrlKey && !e.metaKey) {
+                const activeElement = document.activeElement;
+                if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA') {
+                    const status = '<?= $order['status'] ?>';
+                    if (status === 'diagnosed') {
+                        window.location.href = '/admin/orders/<?= $order['id'] ?>/create-quotation';
+                    } else if (status === 'waiting_approval') {
+                        window.location.href = '/admin/orders/<?= $order['id'] ?>/quotation';
+                    }
+                }
+            }
+
             // P for parts management
             if (e.key === 'p' && !e.ctrlKey && !e.metaKey) {
                 const activeElement = document.activeElement;
@@ -548,12 +611,41 @@
             }
         });
 
-        // Auto-refresh status if order is in progress
-        <?php if (in_array($order['status'], ['received', 'diagnosed', 'in_progress', 'waiting_parts'])): ?>
+        // Auto-refresh for orders in progress (every 5 minutes)
+        <?php if (in_array($order['status'], ['waiting_approval', 'in_progress'])): ?>
         setInterval(function() {
-            // You can implement real-time status checking here
-            // For example, fetch current status via AJAX
-        }, 60000); // Check every minute
+            if (!document.hidden) {
+                // Check for status updates without full page reload
+                fetch(`/admin/api/orders/<?= $order['id'] ?>/status`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status !== '<?= $order['status'] ?>') {
+                            // Status changed, show notification and offer to reload
+                            if (confirm('Order status has been updated. Reload page to see changes?')) {
+                                location.reload();
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        // Silently fail - don't disturb user
+                    });
+            }
+        }, 300000); // 5 minutes
         <?php endif; ?>
+
+        // Progress bar animation on load
+        document.addEventListener('DOMContentLoaded', function() {
+            const progressSteps = document.querySelectorAll('.w-10.h-10.rounded-full');
+            progressSteps.forEach((step, index) => {
+                step.style.opacity = '0';
+                step.style.transform = 'scale(0.8)';
+
+                setTimeout(() => {
+                    step.style.transition = 'all 0.3s ease';
+                    step.style.opacity = '1';
+                    step.style.transform = 'scale(1)';
+                }, index * 100);
+            });
+        });
     </script>
 <?= $this->endSection() ?>
