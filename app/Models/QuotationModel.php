@@ -103,7 +103,7 @@ class QuotationModel extends Model
     /**
      * Get quotation for specific order
      */
-    public function getQuotationByOrder($orderId): array
+    public function getQuotationByOrder($orderId): object|array|null
     {
         return $this->select('
                 quotations.*,
@@ -196,5 +196,90 @@ class QuotationModel extends Model
                 ->where('valid_until <', date('Y-m-d'))
                 ->countAllResults()
         ];
+    }
+
+    /**
+     * Get quotation by ID with order details
+     */
+    public function getQuotationWithOrderDetails($id): ?array
+    {
+        $result = $this->select('
+                quotations.*,
+                repair_orders.order_number,
+                repair_orders.status as order_status,
+                repair_orders.device_brand,
+                repair_orders.device_model,
+                repair_orders.problem_description,
+                customers.full_name as customer_name,
+                customers.phone as customer_phone,
+                customers.email as customer_email,
+                customers.address as customer_address,
+                device_types.name as device_type_name,
+                users.full_name as created_by_name
+            ')
+            ->join('repair_orders', 'repair_orders.id = quotations.order_id')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->join('users', 'users.id = quotations.created_by', 'left')
+            ->where('quotations.id', $id)
+            ->first();
+
+        return $result ? $result : null;
+    }
+
+    /**
+     * Calculate quotation totals
+     */
+    public function calculateQuotationTotals($data): array
+    {
+        $serviceCost = $data['service_cost'] ?? 0;
+        $partsCost = $data['parts_cost'] ?? 0;
+        $additionalCost = $data['additional_cost'] ?? 0;
+        $discountAmount = $data['discount_amount'] ?? 0;
+        $discountPercentage = $data['discount_percentage'] ?? 0;
+        $taxPercentage = $data['tax_percentage'] ?? 0;
+
+        // Calculate subtotal
+        $subtotal = $serviceCost + $partsCost + $additionalCost;
+
+        // Apply percentage discount if set
+        if ($discountPercentage > 0) {
+            $discountAmount = ($subtotal * $discountPercentage) / 100;
+        }
+
+        // Subtotal after discount
+        $afterDiscount = $subtotal - $discountAmount;
+
+        // Calculate tax
+        $taxAmount = ($afterDiscount * $taxPercentage) / 100;
+
+        // Final total
+        $totalCost = $afterDiscount + $taxAmount;
+
+        return [
+            'subtotal' => $subtotal,
+            'discount_amount' => $discountAmount,
+            'tax_amount' => $taxAmount,
+            'total_cost' => $totalCost
+        ];
+    }
+
+    /**
+     * Update quotation with revision
+     */
+    public function createRevision($originalId, $newData): bool|int|string
+    {
+        // Mark original as superseded
+        $this->update($originalId, [
+            'status' => 'superseded',
+            'updated_at' => date('Y-m-d H:i:s')
+        ]);
+
+        // Create new revision
+        $newData['status'] = 'draft';
+        $newData['created_at'] = date('Y-m-d H:i:s');
+        $newData['updated_at'] = date('Y-m-d H:i:s');
+
+        return $this->insert($newData);
     }
 }

@@ -26,36 +26,48 @@
             <!-- Main Form -->
             <div class="lg:col-span-2 space-y-6">
                 <!-- Diagnosis Summary -->
-                <div class="bg-blue-50 border border-blue-200 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold text-blue-800 mb-4">
-                        <i class="fas fa-stethoscope mr-2"></i>Diagnosis Summary
-                    </h3>
-                    <div class="space-y-3 text-sm">
-                        <?php if ($order['diagnosis_notes']): ?>
-                            <div>
-                                <span class="font-medium text-blue-800">Findings:</span>
-                                <p class="text-blue-700 mt-1"><?= nl2br($order['diagnosis_notes']) ?></p>
-                            </div>
-                        <?php endif; ?>
+                <?php if (!empty($order['diagnosis_notes']) || !empty($order['recommended_actions'])): ?>
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-6">
+                        <h3 class="text-lg font-semibold text-blue-800 mb-4">
+                            <i class="fas fa-stethoscope mr-2"></i>Diagnosis Summary
+                        </h3>
+                        <div class="space-y-3 text-sm">
+                            <?php if (!empty($order['diagnosis_notes'])): ?>
+                                <div>
+                                    <span class="font-medium text-blue-800">Findings:</span>
+                                    <p class="text-blue-700 mt-1"><?= nl2br($order['diagnosis_notes']) ?></p>
+                                </div>
+                            <?php endif; ?>
 
-                        <?php if ($order['recommended_actions']): ?>
-                            <div>
-                                <span class="font-medium text-blue-800">Recommended Actions:</span>
-                                <p class="text-blue-700 mt-1"><?= nl2br($order['recommended_actions']) ?></p>
-                            </div>
-                        <?php endif; ?>
+                            <?php if (!empty($order['recommended_actions'])): ?>
+                                <div>
+                                    <span class="font-medium text-blue-800">Recommended Actions:</span>
+                                    <p class="text-blue-700 mt-1"><?= nl2br($order['recommended_actions']) ?></p>
+                                </div>
+                            <?php endif; ?>
 
-                        <?php if ($order['estimated_hours']): ?>
-                            <div>
-                                <span class="font-medium text-blue-800">Estimated Hours:</span>
-                                <span class="text-blue-700 ml-2"><?= $order['estimated_hours'] ?> hours</span>
-                            </div>
-                        <?php endif; ?>
+                            <?php if (!empty($order['estimated_hours'])): ?>
+                                <div>
+                                    <span class="font-medium text-blue-800">Estimated Hours:</span>
+                                    <span class="text-blue-700 ml-2"><?= $order['estimated_hours'] ?> hours</span>
+                                </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                </div>
+                <?php endif; ?>
 
                 <!-- Quotation Form -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <?php if (session()->getFlashdata('errors')): ?>
+                        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6">
+                            <ul class="list-disc list-inside space-y-1">
+                                <?php foreach (session()->getFlashdata('errors') as $error): ?>
+                                    <li><?= $error ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                    <?php endif; ?>
+
                     <form action="/admin/orders/<?= $order['id'] ?>/quotation" method="POST" class="space-y-6" id="quotationForm">
                         <?= csrf_field() ?>
 
@@ -82,7 +94,7 @@
                                 <input type="number" name="service_cost" required step="1000" min="0"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                        placeholder="0" id="serviceCostInput"
-                                       value="<?= old('service_cost', $existing_quotation['service_cost'] ?? '') ?>"
+                                       value="<?= old('service_cost', isset($existing_quotation) && $existing_quotation ? $existing_quotation['service_cost'] : '') ?>"
                                        onchange="calculateTotal()">
                                 <p class="text-xs text-gray-500 mt-1">Labor charges for repair work</p>
                             </div>
@@ -123,7 +135,7 @@
                                 <input type="number" name="parts_cost" step="1000" min="0"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                        placeholder="0" id="partsCostInput"
-                                       value="<?= old('parts_cost', $existing_quotation['parts_cost'] ?? '') ?>"
+                                       value="<?= old('parts_cost', isset($existing_quotation) && $existing_quotation ? $existing_quotation['parts_cost'] : '') ?>"
                                        onchange="calculateTotal()">
                                 <p class="text-xs text-gray-500 mt-1">Cost of replacement parts and materials</p>
                             </div>
@@ -137,7 +149,7 @@
                                 <input type="number" name="additional_cost" step="1000" min="0"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                        placeholder="0" id="additionalCostInput"
-                                       value="<?= old('additional_cost', $existing_quotation['additional_cost'] ?? '') ?>"
+                                       value="<?= old('additional_cost', isset($existing_quotation) && $existing_quotation ? $existing_quotation['additional_cost'] : '') ?>"
                                        onchange="calculateTotal()">
                                 <p class="text-xs text-gray-500 mt-1">Any additional charges (shipping, express service, etc.)</p>
                             </div>
@@ -153,7 +165,7 @@
                                         <input type="number" name="discount_percentage" step="0.1" min="0" max="100"
                                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                placeholder="0" id="discountPercentageInput"
-                                               value="<?= old('discount_percentage', $existing_quotation['discount_percentage'] ?? '') ?>"
+                                               value="<?= old('discount_percentage', isset($existing_quotation) && $existing_quotation ? $existing_quotation['discount_percentage'] : '') ?>"
                                                onchange="calculateTotal()">
                                     </div>
                                     <div class="text-center text-sm text-gray-500">OR</div>
@@ -162,7 +174,7 @@
                                         <input type="number" name="discount_amount" step="1000" min="0"
                                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                placeholder="0" id="discountAmountInput"
-                                               value="<?= old('discount_amount', $existing_quotation['discount_amount'] ?? '') ?>"
+                                               value="<?= old('discount_amount', isset($existing_quotation) && $existing_quotation ? $existing_quotation['discount_amount'] : '') ?>"
                                                onchange="calculateTotal()">
                                     </div>
                                 </div>
@@ -175,7 +187,7 @@
                                     <input type="number" name="tax_percentage" step="0.1" min="0" max="100"
                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                            placeholder="0" id="taxPercentageInput"
-                                           value="<?= old('tax_percentage', $existing_quotation['tax_percentage'] ?? $default_tax_rate) ?>"
+                                           value="<?= old('tax_percentage', isset($existing_quotation) && $existing_quotation ? $existing_quotation['tax_percentage'] : $default_tax_rate) ?>"
                                            onchange="calculateTotal()">
                                     <p class="text-xs text-gray-500 mt-1">PPN or other applicable taxes</p>
                                 </div>
@@ -224,14 +236,14 @@
                                 <input type="text" name="estimated_duration" required
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                        placeholder="e.g., 2-3 working days"
-                                       value="<?= old('estimated_duration', $existing_quotation['estimated_duration'] ?? '') ?>">
+                                       value="<?= old('estimated_duration', isset($existing_quotation) && $existing_quotation ? $existing_quotation['estimated_duration'] : '') ?>">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Warranty Period</label>
                                 <input type="text" name="warranty_period"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                        placeholder="e.g., 30 days"
-                                       value="<?= old('warranty_period', $existing_quotation['warranty_period'] ?? $default_warranty) ?>">
+                                       value="<?= old('warranty_period', isset($existing_quotation) && $existing_quotation ? $existing_quotation['warranty_period'] : $default_warranty) ?>">
                             </div>
                         </div>
 
@@ -239,7 +251,7 @@
                             <label class="block text-sm font-medium text-gray-700 mb-2">Valid Until *</label>
                             <input type="date" name="valid_until" required
                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                   value="<?= old('valid_until', $existing_quotation['valid_until'] ?? date('Y-m-d', strtotime('+7 days'))) ?>"
+                                   value="<?= old('valid_until', isset($existing_quotation) && $existing_quotation ? $existing_quotation['valid_until'] : date('Y-m-d', strtotime('+7 days'))) ?>"
                                    min="<?= date('Y-m-d') ?>">
                         </div>
 
@@ -248,7 +260,7 @@
                             <label class="block text-sm font-medium text-gray-700 mb-2">Terms & Conditions</label>
                             <textarea name="terms_conditions" rows="4"
                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                      placeholder="Enter terms and conditions..."><?= old('terms_conditions', $existing_quotation['terms_conditions'] ?? get_site_setting('default_terms', '1. Payment required before work begins\n2. Warranty void if device is opened by customer\n3. Data backup is customer\'s responsibility')) ?></textarea>
+                                      placeholder="Enter terms and conditions..."><?= old('terms_conditions', isset($existing_quotation) && $existing_quotation ? $existing_quotation['terms_conditions'] : get_site_setting('default_terms', '1. Payment required before work begins\n2. Warranty void if device is opened by customer\n3. Data backup is customer\'s responsibility')) ?></textarea>
                         </div>
 
                         <!-- Internal Notes -->
@@ -256,7 +268,7 @@
                             <label class="block text-sm font-medium text-gray-700 mb-2">Internal Notes</label>
                             <textarea name="internal_notes" rows="3"
                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                      placeholder="Internal notes (not visible to customer)..."><?= old('internal_notes', $existing_quotation['internal_notes'] ?? '') ?></textarea>
+                                      placeholder="Internal notes (not visible to customer)..."><?= old('internal_notes', isset($existing_quotation) && $existing_quotation ? $existing_quotation['internal_notes'] : '') ?></textarea>
                         </div>
 
                         <!-- Hidden total field -->

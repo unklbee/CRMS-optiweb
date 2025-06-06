@@ -44,7 +44,25 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('orders/(:num)/create-quotation', 'OrderController::createQuotation/$1');
         $routes->post('orders/(:num)/quotation', 'OrderController::saveQuotation/$1');
         $routes->get('orders/(:num)/quotation', 'OrderController::showQuotation/$1');
+        $routes->get('orders/(:num)/quotation/edit', 'OrderController::editQuotation/$1');
+        $routes->post('orders/(:num)/quotation/revise', 'OrderController::reviseQuotation/$1');
+
+        // Individual quotation management
+        $routes->get('quotations/(:num)', 'OrderController::viewQuotation/$1');
+        $routes->get('quotations/(:num)/pdf', 'OrderController::viewQuotation/$1?print=1');
         $routes->get('orders/(:num)/quotation/(:num)/send', 'OrderController::sendQuotation/$1/$2');
+
+        // Quotation management controller
+        $routes->get('quotations', 'QuotationController::index');
+        $routes->get('quotations/pending', 'QuotationController::pending');
+        $routes->get('quotations/expired', 'QuotationController::expired');
+        $routes->get('quotations/analytics', 'QuotationController::analytics');
+        $routes->get('quotations/export', 'QuotationController::export');
+        $routes->get('quotations/(:num)/duplicate', 'QuotationController::duplicate/$1');
+        $routes->get('quotations/(:num)/send-reminder', 'QuotationController::sendReminder/$1');
+        $routes->get('quotations/(:num)/mark-expired', 'QuotationController::markExpired/$1');
+        $routes->get('quotations/(:num)/convert-to-invoice', 'QuotationController::convertToInvoice/$1');
+        $routes->post('quotations/bulk-action', 'QuotationController::bulkAction');
 
         // Parts management in orders
         $routes->get('orders/(:num)/manage-parts', 'OrderController::manageParts/$1');

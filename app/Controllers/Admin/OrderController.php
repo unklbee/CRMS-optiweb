@@ -984,18 +984,17 @@ class OrderController extends BaseController
      */
     public function showQuotation($id): string
     {
-        $order = $this->orderModel->find($id);
-        $quotation = $this->quotationModel->getQuotationByOrder($id);
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
 
-        if (!$order || !$quotation) {
-            throw new PageNotFoundException('Order or quotation not found');
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found');
         }
 
         $data = [
             'title' => 'Quotation Details',
-            'order' => $order,
             'quotation' => $quotation,
-            'order_parts' => $this->orderPartModel->getOrderParts($id),
+            'order_parts' => $this->orderPartModel->getOrderParts($quotation['order_id']),
+            'print_mode' => $this->request->getGet('print') === '1',
             'shop_info' => [
                 'name' => get_site_setting('site_name', 'Computer Repair Shop'),
                 'address' => get_site_setting('address', ''),
@@ -1004,7 +1003,34 @@ class OrderController extends BaseController
             ]
         ];
 
-        return view('admin/orders/quotation', $data);
+        return view('admin/orders/quotation_pdf', $data);
+    }
+
+    /**
+     * Show quotation by quotation ID
+     */
+    public function viewQuotation($quotationId): string
+    {
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
+
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found');
+        }
+
+        $data = [
+            'title' => 'Quotation - ' . $quotation['quotation_number'],
+            'quotation' => $quotation,
+            'order_parts' => $this->orderPartModel->getOrderParts($quotation['order_id']),
+            'print_mode' => $this->request->getGet('print') === '1',
+            'shop_info' => [
+                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
+                'address' => get_site_setting('address', ''),
+                'phone' => get_site_setting('contact_phone', ''),
+                'email' => get_site_setting('contact_email', ''),
+            ]
+        ];
+
+        return view('admin/orders/quotation_pdf', $data);
     }
 
     /**
@@ -1043,6 +1069,101 @@ class OrderController extends BaseController
         }
 
         return redirect()->back()->with('error', 'Failed to send quotation email');
+    }
+
+    /**
+     * Edit existing quotation
+     */
+    public function editQuotation($orderId): string
+    {
+        $order = $this->orderModel->getDiagnosisDetails($orderId);
+        $existingQuotation = $this->quotationModel->getQuotationByOrder($orderId);
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        if (!$existingQuotation) {
+            return redirect()->to("/admin/orders/{$orderId}/create-quotation")
+                ->with('error', 'No quotation found. Create a new one.');
+        }
+
+        $data = [
+            'title' => 'Edit Quotation',
+            'order' => $order,
+            'existing_quotation' => $existingQuotation,
+            'is_edit_mode' => true,
+            'default_tax_rate' => get_site_setting('tax_rate', 0),
+            'default_warranty' => get_site_setting('default_warranty', '30 days'),
+            'service_rates' => $this->getServiceRates($order['device_type_id']),
+            'order_parts' => $this->orderPartModel->getOrderParts($orderId)
+        ];
+
+        return view('admin/orders/create_quotation', $data);
+    }
+
+    /**
+     * Create quotation revision
+     */
+    public function reviseQuotation($orderId)
+    {
+        $order = $this->orderModel->find($orderId);
+        $existingQuotation = $this->quotationModel->getQuotationByOrder($orderId);
+
+        if (!$order || !$existingQuotation) {
+            throw new PageNotFoundException('Order or quotation not found');
+        }
+
+        // Validate input
+        $rules = [
+            'service_cost' => 'required|decimal',
+            'parts_cost' => 'permit_empty|decimal',
+            'total_cost' => 'required|decimal',
+            'estimated_duration' => 'required',
+            'valid_until' => 'required|valid_date',
+            'revision_reason' => 'required|min_length[10]'
+        ];
+
+        if (!$this->validate($rules)) {
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // Prepare revision data
+        $revisionData = [
+            'order_id' => $orderId,
+            'service_cost' => $this->request->getPost('service_cost'),
+            'parts_cost' => $this->request->getPost('parts_cost') ?: 0,
+            'additional_cost' => $this->request->getPost('additional_cost') ?: 0,
+            'discount_amount' => $this->request->getPost('discount_amount') ?: 0,
+            'discount_percentage' => $this->request->getPost('discount_percentage') ?: 0,
+            'tax_percentage' => $this->request->getPost('tax_percentage') ?: 0,
+            'estimated_duration' => $this->request->getPost('estimated_duration'),
+            'warranty_period' => $this->request->getPost('warranty_period'),
+            'terms_conditions' => $this->request->getPost('terms_conditions'),
+            'internal_notes' => $this->request->getPost('internal_notes') . "\n\nRevision Reason: " . $this->request->getPost('revision_reason'),
+            'valid_until' => $this->request->getPost('valid_until'),
+            'created_by' => session()->get('user_id')
+        ];
+
+        // Create revision
+        $newQuotationId = $this->quotationModel->createRevision($existingQuotation['id'], $revisionData);
+
+        if ($newQuotationId) {
+            // Log status change
+            $historyModel = new OrderStatusHistoryModel();
+            $historyModel->addStatusChange(
+                $orderId,
+                $order['status'],
+                'waiting_approval',
+                'Quotation revised: ' . $this->request->getPost('revision_reason'),
+                session()->get('user_id')
+            );
+
+            return redirect()->to("/admin/orders/{$orderId}/quotation/{$newQuotationId}")
+                ->with('success', 'Quotation revision created successfully');
+        }
+
+        return redirect()->back()->with('error', 'Failed to create quotation revision');
     }
 
     /**
