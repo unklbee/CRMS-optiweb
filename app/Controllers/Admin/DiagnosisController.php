@@ -36,51 +36,141 @@ class DiagnosisController extends BaseController
     {
         $perPage = 20;
         $page = $this->request->getGet('page') ?? 1;
-        $status = $this->request->getGet('status');
-        $technician = $this->request->getGet('technician');
 
+        // Get filter parameters
+        $status = $this->request->getGet('status');
+        $deviceType = $this->request->getGet('device_type');
+        $technician = $this->request->getGet('technician');
+        $search = $this->request->getGet('search');
+
+        // Build main query
         $builder = $this->orderModel->select('
-                repair_orders.*,
-                customers.full_name as customer_name,
-                customers.phone as customer_phone,
-                device_types.name as device_type_name,
-                users.full_name as technician_name
-            ')
+            repair_orders.*,
+            customers.full_name as customer_name,
+            customers.phone as customer_phone,
+            customers.email as customer_email,
+            device_types.name as device_type_name,
+            diagnosed_by_user.full_name as diagnosed_by_name,
+            repair_orders.diagnosis_date
+        ')
             ->join('customers', 'customers.id = repair_orders.customer_id')
             ->join('device_types', 'device_types.id = repair_orders.device_type_id')
-            ->join('users', 'users.id = repair_orders.technician_id', 'left');
+            ->join('users as diagnosed_by_user', 'diagnosed_by_user.id = repair_orders.diagnosed_by', 'left');
 
-        // Filter by diagnosis status
+        // Apply filters
         if ($status) {
             $builder->where('repair_orders.diagnosis_status', $status);
         } else {
-            $builder->whereIn('repair_orders.diagnosis_status', ['pending', 'in_progress']);
+            // Show orders that need diagnosis attention
+            $builder->whereIn('repair_orders.diagnosis_status', ['pending', 'in_progress', 'completed']);
         }
 
-        // Filter by technician
+        if ($deviceType) {
+            $builder->where('repair_orders.device_type_id', $deviceType);
+        }
+
         if ($technician) {
             $builder->where('repair_orders.diagnosed_by', $technician);
         }
 
+        if ($search) {
+            $builder->groupStart()
+                ->like('repair_orders.order_number', $search)
+                ->orLike('customers.full_name', $search)
+                ->orLike('customers.phone', $search)
+                ->orLike('repair_orders.device_brand', $search)
+                ->orLike('repair_orders.device_model', $search)
+                ->groupEnd();
+        }
+
+        // Order by priority and date
         $builder->orderBy('repair_orders.priority', 'DESC')
             ->orderBy('repair_orders.created_at', 'ASC');
 
+        // Get paginated results
         $orders = $builder->paginate($perPage);
         $pager = $this->orderModel->pager;
 
-        $summary = $this->orderModel->getDiagnosisSummary();
+        // Get statistics
+        $stats = $this->getDiagnosisStatistics();
 
+        // Get priority orders (high priority, pending diagnosis)
+        $priorityOrders = $this->orderModel->select('
+            repair_orders.id,
+            repair_orders.order_number,
+            customers.full_name as customer_name
+        ')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->where('repair_orders.diagnosis_status', 'pending')
+            ->where('repair_orders.priority', 'high')
+            ->orderBy('repair_orders.created_at', 'ASC')
+            ->limit(10)
+            ->findAll();
+
+        // Get today's completed diagnoses
+        $todayCompleted = $this->orderModel->select('
+            repair_orders.id,
+            repair_orders.order_number,
+            diagnosed_by_user.full_name as diagnosed_by_name
+        ')
+            ->join('users as diagnosed_by_user', 'diagnosed_by_user.id = repair_orders.diagnosed_by', 'left')
+            ->where('repair_orders.diagnosis_status', 'completed')
+            ->where('DATE(repair_orders.diagnosis_date)', date('Y-m-d'))
+            ->orderBy('repair_orders.diagnosis_date', 'DESC')
+            ->limit(10)
+            ->findAll();
+
+        // Get popular templates
+        $popularTemplates = $this->templateModel->select('
+            diagnosis_templates.*,
+            device_types.name as device_type_name
+        ')
+            ->join('device_types', 'device_types.id = diagnosis_templates.device_type_id')
+            ->orderBy('diagnosis_templates.id', 'DESC') // Could be usage_count if you track it
+            ->limit(10)
+            ->findAll();
+
+        // Prepare data for view
         $data = [
             'title' => 'Diagnosis Queue',
             'orders' => $orders,
             'pager' => $pager,
-            'summary' => $summary,
+            'stats' => $stats,
+            'device_types' => $this->deviceTypeModel->findAll(),
             'technicians' => $this->userModel->getTechnicians(),
-            'current_status' => $status,
-            'current_technician' => $technician
+            'priority_orders' => $priorityOrders,
+            'today_completed' => $todayCompleted,
+            'popular_templates' => $popularTemplates,
+
+            // Current filter values for form persistence
+            'current_filters' => [
+                'status' => $status,
+                'device_type' => $deviceType,
+                'technician' => $technician,
+                'search' => $search
+            ]
         ];
 
         return view('admin/diagnosis/index', $data);
+    }
+
+    /**
+     * Get diagnosis statistics
+     */
+    private function getDiagnosisStatistics(): array
+    {
+        $pending = $this->orderModel->where('diagnosis_status', 'pending')->countAllResults();
+        $inProgress = $this->orderModel->where('diagnosis_status', 'in_progress')->countAllResults();
+        $completed = $this->orderModel->where('diagnosis_status', 'completed')->countAllResults();
+        $today = $this->orderModel->where('DATE(diagnosis_date)', date('Y-m-d'))->countAllResults();
+
+        return [
+            'pending' => $pending,
+            'in_progress' => $inProgress,
+            'completed' => $completed,
+            'today' => $today,
+            'total' => $pending + $inProgress + $completed
+        ];
     }
 
     /**

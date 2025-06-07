@@ -43,8 +43,11 @@ class UserModel extends Model
 
     public function getTechnicians(): array
     {
-        return $this->where('role', 'technician')
+        return $this->select('id, full_name, username, email')
+            ->where('role', 'technician')
+            ->orWhere('role', 'admin') // Admin can also be technician
             ->where('status', 'active')
+            ->orderBy('full_name', 'ASC')
             ->findAll();
     }
 

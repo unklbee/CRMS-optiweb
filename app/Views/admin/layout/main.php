@@ -45,7 +45,7 @@
                     Repair Orders
                 </a>
 
-                <a href="/admin/orders/diagnosis-queue" class="flex items-center px-4 py-3 text-gray-700 hover:bg-primary hover:text-white rounded-lg transition-colors mb-1 <?= (strpos(current_url(), 'diagnosis') !== false) ? 'bg-primary text-white' : '' ?>">
+                <a href="/admin/diagnosis" class="flex items-center px-4 py-3 text-gray-700 hover:bg-primary hover:text-white rounded-lg transition-colors mb-1 <?= (strpos(current_url(), 'diagnosis') !== false) ? 'bg-primary text-white' : '' ?>">
                     <i class="fas fa-stethoscope mr-3"></i>
                     Diagnosis Queue
                     <?php

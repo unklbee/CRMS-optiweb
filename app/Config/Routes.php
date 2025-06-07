@@ -56,14 +56,12 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('orders/(:num)/delivery-receipt', 'OrderController::deliveryReceipt/$1');
 
         // BACKWARD COMPATIBILITY: Redirect old diagnosis URLs to new DiagnosisController
-        $routes->get('orders/diagnosis-queue', 'DiagnosisController::index'); // Redirect
         $routes->get('orders/(:num)/diagnosis', 'OrderController::redirectToDiagnosis/$1');
-        $routes->get('orders/(:num)/start-diagnosis', 'OrderController::redirectToDiagnosis/$1');
 
         // ===============================================
         // NEW: SEPARATE DIAGNOSIS MANAGEMENT
         // ===============================================
-        $routes->group('diagnosis', function($routes) {
+        $routes->group('diagnosis', ['namespace' => 'App\Controllers\Admin'], function($routes) {
             // Main diagnosis queue and management
             $routes->get('/', 'DiagnosisController::index');
             $routes->get('queue', 'DiagnosisController::index'); // Alias for backward compatibility
@@ -73,8 +71,9 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
             $routes->get('(:num)/create', 'DiagnosisController::create/$1');
             $routes->post('(:num)', 'DiagnosisController::store/$1');
             $routes->get('(:num)', 'DiagnosisController::show/$1');
+            $routes->post('(:num)/store', 'DiagnosisController::store/$1');
             $routes->get('(:num)/edit', 'DiagnosisController::edit/$1');
-            $routes->put('(:num)', 'DiagnosisController::update/$1');
+            $routes->post('(:num)/update', 'DiagnosisController::update/$1');
 
             // Templates and utilities
             $routes->get('templates', 'DiagnosisController::templates');

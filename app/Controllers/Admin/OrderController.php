@@ -245,7 +245,6 @@ class OrderController extends BaseController
             'priority' => $this->request->getPost('priority'),
             'status' => 'received',
             'notes' => $this->request->getPost('notes')
-            // Removed 'diagnosis_status' => 'pending' - let model handle this or check if field exists
         ];
 
         // Debug: Log the data being inserted
