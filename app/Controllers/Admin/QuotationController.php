@@ -124,7 +124,7 @@ class QuotationController extends BaseController
     /**
      * Create quotation form for specific order
      */
-    public function create($orderId): string
+    public function create($orderId): string|RedirectResponse
     {
         $order = $this->orderModel->select('
                 repair_orders.*,
@@ -222,7 +222,7 @@ class QuotationController extends BaseController
     /**
      * Show quotation for specific order
      */
-    public function showOrderQuotation($orderId): string
+    public function showOrderQuotation($orderId): RedirectResponse
     {
         $quotation = $this->quotationModel->where('order_id', $orderId)->first();
 

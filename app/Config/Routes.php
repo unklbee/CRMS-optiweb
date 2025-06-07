@@ -73,7 +73,7 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
             $routes->get('(:num)', 'DiagnosisController::show/$1');
             $routes->post('(:num)/store', 'DiagnosisController::store/$1');
             $routes->get('(:num)/edit', 'DiagnosisController::edit/$1');
-            $routes->post('(:num)/update', 'DiagnosisController::update/$1');
+            $routes->put('(:num)', 'DiagnosisController::update/$1');
 
             // Templates and utilities
             $routes->get('templates', 'DiagnosisController::templates');
@@ -108,6 +108,7 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('quotations/export', 'QuotationController::export');
 
         $routes->get('quotations/(:num)', 'QuotationController::show/$1');
+        $routes->get('quotations/create/(:num)', 'QuotationController::create/$1');
         $routes->get('quotations/(:num)/edit', 'QuotationController::edit/$1');
         $routes->put('quotations/(:num)', 'QuotationController::update/$1');
         $routes->delete('quotations/(:num)', 'QuotationController::delete/$1');
