@@ -1,5 +1,5 @@
 <?php
-// app/Models/RepairOrderModel.php
+
 namespace App\Models;
 
 use CodeIgniter\Model;
@@ -11,8 +11,10 @@ class RepairOrderModel extends Model
     protected $allowedFields = [
         'order_number', 'customer_id', 'device_type_id', 'device_brand',
         'device_model', 'device_serial', 'problem_description', 'accessories',
-        'technician_id', 'priority', 'status', 'estimated_cost', 'final_cost',
-        'estimated_completion', 'completed_at', 'notes', 'diagnosis_notes', 'issues_found', 'recommended_actions', 'estimated_hours',
+        'technician_id', 'priority', 'status', 'final_cost',
+        'estimated_completion', 'completed_at', 'notes',
+        // Diagnosis fields (removed estimated_cost)
+        'diagnosis_notes', 'issues_found', 'recommended_actions', 'estimated_hours',
         'diagnosis_date', 'diagnosed_by', 'diagnosis_status', 'customer_contacted'
     ];
 
@@ -116,12 +118,7 @@ class RepairOrderModel extends Model
     }
 
     /**
-     * Update diagnosis information
-     */
-    // REPLACE method updateDiagnosis() di RepairOrderModel dengan yang ini:
-
-    /**
-     * Update diagnosis information
+     * Update diagnosis information - UPDATED VERSION (without estimated_cost)
      */
     public function updateDiagnosis($orderId, $diagnosisData): bool
     {
@@ -144,10 +141,6 @@ class RepairOrderModel extends Model
 
         if (isset($diagnosisData['estimated_hours'])) {
             $updateData['estimated_hours'] = $diagnosisData['estimated_hours'];
-        }
-
-        if (isset($diagnosisData['estimated_cost'])) {
-            $updateData['estimated_cost'] = $diagnosisData['estimated_cost'];
         }
 
         // Always set these fields
@@ -201,5 +194,56 @@ class RepairOrderModel extends Model
         }
 
         return $order ?: [];
+    }
+
+    /**
+     * Get orders ready for quotation (diagnosed but no quotation yet)
+     */
+    public function getOrdersReadyForQuotation($limit = null): array
+    {
+        $query = $this->select('
+            repair_orders.*,
+            customers.full_name as customer_name,
+            customers.phone as customer_phone,
+            device_types.name as device_type_name,
+            users.full_name as technician_name
+        ')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->join('users', 'users.id = repair_orders.technician_id', 'left')
+            ->where('repair_orders.status', 'diagnosed')
+            ->where('repair_orders.diagnosis_status', 'completed')
+            ->orderBy('repair_orders.diagnosis_date', 'ASC');
+
+        if ($limit) {
+            $query->limit($limit);
+        }
+
+        return $query->findAll();
+    }
+
+    /**
+     * Get orders by diagnosis status
+     */
+    public function getOrdersByDiagnosisStatus($status, $limit = null): array
+    {
+        $query = $this->select('
+            repair_orders.*,
+            customers.full_name as customer_name,
+            customers.phone as customer_phone,
+            device_types.name as device_type_name,
+            users.full_name as technician_name
+        ')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->join('users', 'users.id = repair_orders.technician_id', 'left')
+            ->where('repair_orders.diagnosis_status', $status)
+            ->orderBy('repair_orders.created_at', 'DESC');
+
+        if ($limit) {
+            $query->limit($limit);
+        }
+
+        return $query->findAll();
     }
 }

@@ -16,5 +16,6 @@ class DatabaseSeeder extends Seeder
         $this->call('CmsSettingSeeder');
         $this->call('CmsPageSeeder');
         $this->call('SampleDataSeeder');
+        $this->call('DiagnosisTemplatesSeeder');
     }
 }

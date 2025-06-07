@@ -10,7 +10,7 @@ use CodeIgniter\Router\RouteCollection;
 $routes->get('/', 'Frontend\HomeController::index');
 
 // PUBLIC QUOTATION ROUTES (Before admin group)
-$routes->group('quotation', function($routes) {
+$routes->group('quotation', ['namespace' => 'App\Controllers'], function($routes) {
     $routes->get('(:num)', 'QuotationController::view/$1');
     $routes->get('(:num)/approve', 'QuotationController::approve/$1');
     $routes->post('(:num)/approve', 'QuotationController::approve/$1');
@@ -32,10 +32,12 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('/', 'DashboardController::index'); // redirect ke dashboard
         $routes->get('dashboard', 'DashboardController::index');
 
-        // Order management - UPDATED WITH NEW ROUTES
+        // ===============================================
+        // ORDER MANAGEMENT - CLEANED UP (Diagnosis methods removed)
+        // ===============================================
         $routes->get('orders', 'OrderController::index');
-        $routes->get('orders/new', 'OrderController::new');
-        $routes->post('orders', 'OrderController::create');
+        $routes->get('orders/new', 'OrderController::create');
+        $routes->post('orders', 'OrderController::store');
         $routes->get('orders/(:num)', 'OrderController::show/$1');
         $routes->get('orders/(:num)/edit', 'OrderController::edit/$1');
         $routes->put('orders/(:num)', 'OrderController::update/$1');
@@ -45,36 +47,6 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('orders/(:num)/status', 'OrderController::updateStatus/$1');
         $routes->post('orders/(:num)/status', 'OrderController::saveStatus/$1');
 
-        // Diagnosis routes
-        $routes->get('orders/diagnosis-queue', 'OrderController::diagnosisQueue');
-        $routes->get('orders/(:num)/diagnosis', 'OrderController::diagnosis/$1');
-        $routes->post('orders/(:num)/diagnosis', 'OrderController::saveDiagnosis/$1');
-        $routes->get('orders/(:num)/start-diagnosis', 'OrderController::startDiagnosis/$1');
-
-        // Quotation routes - UPDATED
-        $routes->get('orders/(:num)/create-quotation', 'OrderController::createQuotation/$1');
-        $routes->post('orders/(:num)/quotation', 'OrderController::saveQuotation/$1');
-        $routes->get('orders/(:num)/quotation', 'OrderController::showQuotation/$1');
-        $routes->get('orders/(:num)/quotation/edit', 'OrderController::editQuotation/$1');
-        $routes->post('orders/(:num)/quotation/revise', 'OrderController::reviseQuotation/$1');
-
-        // Individual quotation management
-        $routes->get('quotations/(:num)', 'OrderController::viewQuotation/$1');
-        $routes->get('quotations/(:num)/pdf', 'OrderController::viewQuotation/$1?print=1');
-        $routes->get('orders/(:num)/quotation/(:num)/send', 'OrderController::sendQuotation/$1/$2');
-
-        // Quotation management controller
-        $routes->get('quotations', 'QuotationController::index');
-        $routes->get('quotations/pending', 'QuotationController::pending');
-        $routes->get('quotations/expired', 'QuotationController::expired');
-        $routes->get('quotations/analytics', 'QuotationController::analytics');
-        $routes->get('quotations/export', 'QuotationController::export');
-        $routes->get('quotations/(:num)/duplicate', 'QuotationController::duplicate/$1');
-        $routes->get('quotations/(:num)/send-reminder', 'QuotationController::sendReminder/$1');
-        $routes->get('quotations/(:num)/mark-expired', 'QuotationController::markExpired/$1');
-        $routes->get('quotations/(:num)/convert-to-invoice', 'QuotationController::convertToInvoice/$1');
-        $routes->post('quotations/bulk-action', 'QuotationController::bulkAction');
-
         // Parts management in orders
         $routes->get('orders/(:num)/manage-parts', 'OrderController::manageParts/$1');
         $routes->post('orders/(:num)/parts', 'OrderController::addPart/$1');
@@ -83,7 +55,79 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->get('orders/(:num)/email-receipt', 'OrderController::emailReceipt/$1');
         $routes->get('orders/(:num)/delivery-receipt', 'OrderController::deliveryReceipt/$1');
 
-        // Customer management
+        // BACKWARD COMPATIBILITY: Redirect old diagnosis URLs to new DiagnosisController
+        $routes->get('orders/diagnosis-queue', 'DiagnosisController::index'); // Redirect
+        $routes->get('orders/(:num)/diagnosis', 'OrderController::redirectToDiagnosis/$1');
+        $routes->get('orders/(:num)/start-diagnosis', 'OrderController::redirectToDiagnosis/$1');
+
+        // ===============================================
+        // NEW: SEPARATE DIAGNOSIS MANAGEMENT
+        // ===============================================
+        $routes->group('diagnosis', function($routes) {
+            // Main diagnosis queue and management
+            $routes->get('/', 'DiagnosisController::index');
+            $routes->get('queue', 'DiagnosisController::index'); // Alias for backward compatibility
+
+            // Individual order diagnosis workflow
+            $routes->get('(:num)/start', 'DiagnosisController::start/$1');
+            $routes->get('(:num)/create', 'DiagnosisController::create/$1');
+            $routes->post('(:num)', 'DiagnosisController::store/$1');
+            $routes->get('(:num)', 'DiagnosisController::show/$1');
+            $routes->get('(:num)/edit', 'DiagnosisController::edit/$1');
+            $routes->put('(:num)', 'DiagnosisController::update/$1');
+
+            // Templates and utilities
+            $routes->get('templates', 'DiagnosisController::templates');
+            $routes->get('templates/new', 'DiagnosisController::createTemplate');
+            $routes->post('templates', 'DiagnosisController::storeTemplate');
+            $routes->get('templates/(:num)/edit', 'DiagnosisController::editTemplate/$1');
+            $routes->put('templates/(:num)', 'DiagnosisController::updateTemplate/$1');
+            $routes->delete('templates/(:num)', 'DiagnosisController::deleteTemplate/$1');
+
+            // AJAX endpoints
+            $routes->get('device-type/(:num)/common-issues', 'DiagnosisController::getCommonIssues/$1');
+            $routes->get('device-type/(:num)/templates', 'DiagnosisController::getTemplatesByDeviceType/$1');
+            $routes->get('widget/queue', 'DiagnosisController::getQueueWidget');
+        });
+
+        // ===============================================
+        // QUOTATION MANAGEMENT - UPDATED TO WORK WITH NEW DIAGNOSIS FLOW
+        // ===============================================
+
+        // Create quotation from diagnosed orders
+        $routes->get('orders/(:num)/create-quotation', 'QuotationController::create/$1');
+        $routes->post('orders/(:num)/quotation', 'QuotationController::store/$1');
+        $routes->get('orders/(:num)/quotation', 'QuotationController::showOrderQuotation/$1');
+        $routes->get('orders/(:num)/quotation/edit', 'QuotationController::editOrderQuotation/$1');
+        $routes->post('orders/(:num)/quotation/revise', 'QuotationController::reviseQuotation/$1');
+
+        // Individual quotation management
+        $routes->get('quotations', 'QuotationController::index');
+        $routes->get('quotations/pending', 'QuotationController::pending');
+        $routes->get('quotations/expired', 'QuotationController::expired');
+        $routes->get('quotations/analytics', 'QuotationController::analytics');
+        $routes->get('quotations/export', 'QuotationController::export');
+
+        $routes->get('quotations/(:num)', 'QuotationController::show/$1');
+        $routes->get('quotations/(:num)/edit', 'QuotationController::edit/$1');
+        $routes->put('quotations/(:num)', 'QuotationController::update/$1');
+        $routes->delete('quotations/(:num)', 'QuotationController::delete/$1');
+
+        $routes->get('quotations/(:num)/pdf', 'QuotationController::downloadPdf/$1');
+        $routes->get('quotations/(:num)/duplicate', 'QuotationController::duplicate/$1');
+        $routes->get('quotations/(:num)/send', 'QuotationController::send/$1');
+        $routes->post('quotations/(:num)/send', 'QuotationController::processSend/$1');
+        $routes->get('quotations/(:num)/send-reminder', 'QuotationController::sendReminder/$1');
+        $routes->get('quotations/(:num)/mark-expired', 'QuotationController::markExpired/$1');
+        $routes->get('quotations/(:num)/convert-to-invoice', 'QuotationController::convertToInvoice/$1');
+        $routes->post('quotations/bulk-action', 'QuotationController::bulkAction');
+
+        // Legacy quotation routes (for backward compatibility)
+        $routes->get('orders/(:num)/quotation/(:num)/send', 'QuotationController::send/$2');
+
+        // ===============================================
+        // CUSTOMER MANAGEMENT
+        // ===============================================
         $routes->get('customers', 'CustomerController::index');
         $routes->get('customers/new', 'CustomerController::new');
         $routes->post('customers', 'CustomerController::store');
@@ -92,7 +136,9 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->put('customers/(:num)', 'CustomerController::update/$1');
         $routes->delete('customers/(:num)', 'CustomerController::delete/$1');
 
-        // Service management
+        // ===============================================
+        // SERVICE MANAGEMENT
+        // ===============================================
         $routes->get('services', 'ServiceController::index');
         $routes->get('services/new', 'ServiceController::new');
         $routes->post('services', 'ServiceController::store');
@@ -109,7 +155,9 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->put('service-categories/(:num)', 'ServiceCategoryController::update/$1');
         $routes->delete('service-categories/(:num)', 'ServiceCategoryController::delete/$1');
 
-        // Parts management - UPDATED WITH NEW ROUTES
+        // ===============================================
+        // PARTS MANAGEMENT
+        // ===============================================
         $routes->get('parts', 'PartController::index');
         $routes->get('parts/new', 'PartController::new');
         $routes->post('parts', 'PartController::store');
@@ -118,11 +166,13 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->put('parts/(:num)', 'PartController::update/$1');
         $routes->delete('parts/(:num)', 'PartController::delete/$1');
 
-        // NEW: Stock management routes
+        // Stock management routes
         $routes->get('parts/(:num)/adjust-stock', 'PartController::adjustStock/$1');
         $routes->post('parts/(:num)/adjust-stock', 'PartController::updateStock/$1');
 
-        // User management
+        // ===============================================
+        // USER MANAGEMENT
+        // ===============================================
         $routes->get('users', 'UserController::index');
         $routes->get('users/new', 'UserController::create');
         $routes->post('users', 'UserController::store');
@@ -131,7 +181,9 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->put('users/(:num)', 'UserController::update/$1');
         $routes->delete('users/(:num)', 'UserController::delete/$1');
 
-        // CMS management
+        // ===============================================
+        // CMS MANAGEMENT
+        // ===============================================
         $routes->get('pages', 'PageController::index');
         $routes->get('pages/new', 'PageController::new');
         $routes->post('pages', 'PageController::store');
@@ -141,7 +193,9 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->delete('pages/(:num)', 'PageController::delete/$1');
         $routes->post('pages/(:num)/duplicate', 'PageController::duplicate/$1');
 
-        // Settings
+        // ===============================================
+        // SETTINGS
+        // ===============================================
         $routes->get('settings', 'SettingController::index');
         $routes->post('settings', 'SettingController::update');
         $routes->get('settings/new', 'SettingController::create');
@@ -150,14 +204,30 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
         $routes->put('settings/(:num)', 'SettingController::updateSingle/$1');
         $routes->delete('settings/(:num)', 'SettingController::delete/$1');
 
-        // NEW: Settings backup & restore
+        // Settings backup & restore
         $routes->get('settings/backup', 'SettingController::backup');
         $routes->get('settings/restore', 'SettingController::restore');
         $routes->post('settings/restore', 'SettingController::processRestore');
         $routes->get('settings/cache', 'SettingController::cache');
         $routes->post('settings/clear-cache', 'SettingController::clearCache');
 
-        // NEW: API routes for AJAX calls (within admin area)
+        // ===============================================
+        // REPORTS (NEW SECTION)
+        // ===============================================
+        $routes->group('reports', function($routes) {
+            $routes->get('/', 'ReportController::index');
+            $routes->get('orders', 'ReportController::orders');
+            $routes->get('diagnosis', 'ReportController::diagnosis'); // NEW: Diagnosis reports
+            $routes->get('quotations', 'ReportController::quotations');
+            $routes->get('technician-performance', 'ReportController::technicianPerformance');
+            $routes->get('diagnosis-efficiency', 'ReportController::diagnosisEfficiency'); // NEW
+            $routes->get('cost-analysis', 'ReportController::costAnalysis');
+            $routes->get('export/(:segment)', 'ReportController::export/$1');
+        });
+
+        // ===============================================
+        // API ROUTES FOR AJAX CALLS (within admin area)
+        // ===============================================
         $routes->group('api', function($routes) {
             // Stock movement API
             $routes->get('parts/(:num)/movements', 'PartController::getMovements/$1');
@@ -166,19 +236,35 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function($rout
             // Order API
             $routes->get('orders/(:num)/parts', 'OrderController::getOrderParts/$1');
             $routes->get('orders/(:num)/movements', 'OrderController::getOrderMovements/$1');
+            $routes->get('orders/ready-for-quotation', 'OrderController::getOrdersReadyForQuotation');
+            $routes->get('orders/stats', 'OrderController::getOrderStats');
+
+            // NEW: Diagnosis API
+            $routes->get('diagnosis/queue-stats', 'DiagnosisController::getQueueWidget');
+            $routes->get('diagnosis/common-issues/(:num)', 'DiagnosisController::getCommonIssues/$1');
+            $routes->get('diagnosis/templates/(:num)', 'DiagnosisController::getTemplatesByDeviceType/$1');
+            $routes->get('diagnosis/technician-workload', 'DiagnosisController::getTechnicianWorkload');
+
+            // Quotation API
+            $routes->get('quotations/stats', 'QuotationController::getQuotationStats');
+            $routes->get('quotations/pending-count', 'QuotationController::getPendingCount');
 
             // Dashboard API
             $routes->get('dashboard/stats', 'DashboardController::getStats');
             $routes->get('dashboard/recent-activities', 'DashboardController::getRecentActivities');
+            $routes->get('dashboard/diagnosis-summary', 'DiagnosisController::getQueueWidget'); // NEW
 
             // Search API
             $routes->get('search/parts', 'DashboardController::searchParts');
             $routes->get('search/customers', 'DashboardController::searchCustomers');
+            $routes->get('search/orders', 'DashboardController::searchOrders');
         });
     });
 });
 
-// API routes for frontend
+// ===============================================
+// API ROUTES FOR FRONTEND
+// ===============================================
 $routes->group('api', ['namespace' => 'App\Controllers\Api'], function($routes) {
     $routes->post('orders', 'OrderController::create');
     $routes->get('orders/(:segment)', 'OrderController::show/$1');
@@ -186,7 +272,9 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function($routes) 
     $routes->get('service-categories', 'ServiceCategoryController::index');
 });
 
-// Frontend routes
+// ===============================================
+// FRONTEND ROUTES
+// ===============================================
 $routes->group('', ['namespace' => 'App\Controllers\Frontend'], function($routes) {
     $routes->get('services', 'ServiceController::index');
     $routes->get('services/(:segment)', 'ServiceController::show/$1');

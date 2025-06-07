@@ -61,6 +61,8 @@ class OrderController extends BaseController
                 ->like('repair_orders.order_number', $search)
                 ->orLike('customers.full_name', $search)
                 ->orLike('customers.phone', $search)
+                ->orLike('repair_orders.device_brand', $search)
+                ->orLike('repair_orders.device_model', $search)
                 ->groupEnd();
         }
 
@@ -68,23 +70,25 @@ class OrderController extends BaseController
             $builder->where('repair_orders.status', $status);
         }
 
-        $orders = $builder->orderBy('repair_orders.created_at', 'DESC')
-            ->paginate($perPage);
+        $builder->orderBy('repair_orders.created_at', 'DESC');
+
+        $orders = $builder->paginate($perPage);
+        $pager = $this->orderModel->pager;
 
         $data = [
             'title' => 'Repair Orders',
             'orders' => $orders,
-            'pager' => $this->orderModel->pager,
+            'pager' => $pager,
             'search' => $search,
-            'status' => $status,
+            'current_status' => $status,
             'statuses' => [
                 'received' => 'Received',
                 'diagnosed' => 'Diagnosed',
                 'waiting_approval' => 'Waiting Approval',
+                'approved' => 'Approved',
                 'in_progress' => 'In Progress',
                 'waiting_parts' => 'Waiting Parts',
                 'completed' => 'Completed',
-                'delivered' => 'Delivered',
                 'cancelled' => 'Cancelled'
             ]
         ];
@@ -99,6 +103,7 @@ class OrderController extends BaseController
                 customers.full_name as customer_name,
                 customers.phone as customer_phone,
                 customers.email as customer_email,
+                customers.address as customer_address,
                 device_types.name as device_type_name,
                 users.full_name as technician_name
             ')
@@ -112,34 +117,31 @@ class OrderController extends BaseController
             throw new PageNotFoundException('Order not found');
         }
 
-        // Get parts used in this order
+        // Get order parts
         $orderParts = $this->orderPartModel->getOrderParts($id);
 
-        // Get stock movements for this order
-        $stockMovements = $this->stockMovementModel->getMovementsByReference('order', $id);
+        // Get status history
+        $historyModel = new OrderStatusHistoryModel();
+        $statusHistory = $historyModel->getOrderHistory($id);
+
+        // Get quotations
+        $quotations = $this->quotationModel->where('order_id', $id)
+            ->orderBy('created_at', 'DESC')
+            ->findAll();
 
         $data = [
-            'title' => 'Order Details',
+            'title' => 'Order Details - #' . $order['order_number'],
             'order' => $order,
-            'order_parts' => $orderParts,
-            'stock_movements' => $stockMovements,
-            'technicians' => $this->userModel->getTechnicians(),
-            'statuses' => [
-                'received' => 'Received',
-                'diagnosed' => 'Diagnosed',
-                'waiting_approval' => 'Waiting Approval',
-                'in_progress' => 'In Progress',
-                'waiting_parts' => 'Waiting Parts',
-                'completed' => 'Completed',
-                'delivered' => 'Delivered',
-                'cancelled' => 'Cancelled'
-            ]
+            'parts' => $orderParts,
+            'status_history' => $statusHistory,
+            'quotations' => $quotations,
+            'technicians' => $this->userModel->getTechnicians()
         ];
 
         return view('admin/orders/show', $data);
     }
 
-    public function new(): string
+    public function create(): string
     {
         $data = [
             'title' => 'Create New Order',
@@ -148,18 +150,18 @@ class OrderController extends BaseController
             'technicians' => $this->userModel->getTechnicians()
         ];
 
-        return view('admin/orders/new', $data);
+        return view('admin/orders/create', $data);
     }
 
-    public function create()
+    public function store(): RedirectResponse
     {
         $rules = [
             'customer_id' => 'required|integer',
             'device_type_id' => 'required|integer',
-            'device_brand' => 'required',
-            'device_model' => 'required',
+            'device_brand' => 'required|min_length[2]',
+            'device_model' => 'required|min_length[2]',
             'problem_description' => 'required|min_length[10]',
-            'priority' => 'required|in_list[low,normal,high,urgent]'
+            'priority' => 'required|in_list[low,medium,high,urgent]'
         ];
 
         if (!$this->validate($rules)) {
@@ -167,7 +169,6 @@ class OrderController extends BaseController
         }
 
         $data = [
-            'order_number' => generate_order_number(),
             'customer_id' => $this->request->getPost('customer_id'),
             'device_type_id' => $this->request->getPost('device_type_id'),
             'device_brand' => $this->request->getPost('device_brand'),
@@ -175,39 +176,26 @@ class OrderController extends BaseController
             'device_serial' => $this->request->getPost('device_serial'),
             'problem_description' => $this->request->getPost('problem_description'),
             'accessories' => $this->request->getPost('accessories'),
-            'priority' => $this->request->getPost('priority'),
             'technician_id' => $this->request->getPost('technician_id'),
-            'notes' => $this->request->getPost('notes'),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
+            'priority' => $this->request->getPost('priority'),
+            'status' => 'received',
+            'diagnosis_status' => 'pending',
+            'notes' => $this->request->getPost('notes')
         ];
 
-        $orderId = $this->orderModel->insert($data);
-
-        if ($orderId) {
-            // Log initial status using existing OrderStatusHistoryModel
+        if ($orderId = $this->orderModel->insert($data)) {
+            // Log initial status
             $historyModel = new OrderStatusHistoryModel();
             $historyModel->addStatusChange(
                 $orderId,
                 null,
                 'received',
-                'Order created and device received for inspection',
+                'Order created',
                 session()->get('user_id')
             );
 
-            // Check if user wants to print receipt immediately
-            if ($this->request->getPost('print_receipt')) {
-                return redirect()->to("/admin/orders/{$orderId}/receipt?print=1")
-                    ->with('success', 'Order created successfully. Receipt is ready for printing.');
-            }
-
-            // Check if user wants to view receipt
-            if ($this->request->getPost('view_receipt')) {
-                return redirect()->to("/admin/orders/{$orderId}/receipt")
-                    ->with('success', 'Order created successfully');
-            }
-
-            return redirect()->to('/admin/orders')->with('success', 'Order created successfully');
+            return redirect()->to("/admin/orders/{$orderId}")
+                ->with('success', 'Order created successfully');
         }
 
         return redirect()->back()->with('error', 'Failed to create order');
@@ -222,17 +210,17 @@ class OrderController extends BaseController
         }
 
         $data = [
-            'title' => 'Edit Order',
+            'title' => 'Edit Order - #' . $order['order_number'],
             'order' => $order,
             'customers' => $this->customerModel->findAll(),
-            'device_types' => $this->deviceTypeModel->getActiveTypes(),
+            'device_types' => $this->deviceTypeModel->findAll(),
             'technicians' => $this->userModel->getTechnicians()
         ];
 
         return view('admin/orders/edit', $data);
     }
 
-    public function update($id)
+    public function update($id): RedirectResponse
     {
         $order = $this->orderModel->find($id);
 
@@ -243,10 +231,10 @@ class OrderController extends BaseController
         $rules = [
             'customer_id' => 'required|integer',
             'device_type_id' => 'required|integer',
-            'device_brand' => 'required',
-            'device_model' => 'required',
+            'device_brand' => 'required|min_length[2]',
+            'device_model' => 'required|min_length[2]',
             'problem_description' => 'required|min_length[10]',
-            'priority' => 'required|in_list[low,normal,high,urgent]'
+            'priority' => 'required|in_list[low,medium,high,urgent]'
         ];
 
         if (!$this->validate($rules)) {
@@ -261,58 +249,113 @@ class OrderController extends BaseController
             'device_serial' => $this->request->getPost('device_serial'),
             'problem_description' => $this->request->getPost('problem_description'),
             'accessories' => $this->request->getPost('accessories'),
-            'priority' => $this->request->getPost('priority'),
             'technician_id' => $this->request->getPost('technician_id'),
-            'estimated_cost' => $this->request->getPost('estimated_cost'),
-            'final_cost' => $this->request->getPost('final_cost'),
-            'notes' => $this->request->getPost('notes'),
-            'updated_at' => date('Y-m-d H:i:s')
+            'priority' => $this->request->getPost('priority'),
+            'notes' => $this->request->getPost('notes')
         ];
 
         if ($this->orderModel->update($id, $data)) {
-            return redirect()->to('/admin/orders')->with('success', 'Order updated successfully');
+            return redirect()->to("/admin/orders/{$id}")
+                ->with('success', 'Order updated successfully');
         }
 
         return redirect()->back()->with('error', 'Failed to update order');
     }
 
-    public function updateStatus($id): string
+    public function delete($id): RedirectResponse
     {
-        // PERBAIKAN: Tambahkan join dengan tabel customers untuk mendapatkan customer_name
-        $order = $this->orderModel->select('
-                repair_orders.*,
-                customers.full_name as customer_name,
-                customers.phone as customer_phone,
-                customers.email as customer_email,
-                device_types.name as device_type_name,
-                users.full_name as technician_name
-            ')
-            ->join('customers', 'customers.id = repair_orders.customer_id')
-            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
-            ->join('users', 'users.id = repair_orders.technician_id', 'left')
-            ->where('repair_orders.id', $id)
-            ->first();
+        $order = $this->orderModel->find($id);
 
         if (!$order) {
             throw new PageNotFoundException('Order not found');
         }
 
-        $data = [
-            'title' => 'Update Order Status',
-            'order' => $order,
-            'statuses' => [
-                'received' => 'Received',
-                'diagnosed' => 'Diagnosed',
-                'waiting_approval' => 'Waiting Approval',
-                'in_progress' => 'In Progress',
-                'waiting_parts' => 'Waiting Parts',
-                'completed' => 'Completed',
-                'delivered' => 'Delivered',
-                'cancelled' => 'Cancelled'
-            ]
+        // Check if order can be deleted
+        if (in_array($order['status'], ['in_progress', 'completed'])) {
+            return redirect()->back()->with('error', 'Cannot delete order in current status');
+        }
+
+        if ($this->orderModel->delete($id)) {
+            return redirect()->to('/admin/orders')
+                ->with('success', 'Order deleted successfully');
+        }
+
+        return redirect()->back()->with('error', 'Failed to delete order');
+    }
+
+    public function updateStatus($id): RedirectResponse
+    {
+        $order = $this->orderModel->find($id);
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        $newStatus = $this->request->getPost('status');
+        $notes = $this->request->getPost('notes');
+
+        $validStatuses = [
+            'received', 'diagnosed', 'waiting_approval', 'approved',
+            'in_progress', 'waiting_parts', 'completed', 'cancelled'
         ];
 
-        return view('admin/orders/update_status', $data);
+        if (!in_array($newStatus, $validStatuses)) {
+            return redirect()->back()->with('error', 'Invalid status');
+        }
+
+        $updateData = ['status' => $newStatus];
+
+        // Handle completion
+        if ($newStatus === 'completed') {
+            $updateData['completed_at'] = date('Y-m-d H:i:s');
+            $updateData['final_cost'] = $this->request->getPost('final_cost');
+        }
+
+        if ($this->orderModel->update($id, $updateData)) {
+            // Log status change
+            $historyModel = new OrderStatusHistoryModel();
+            $historyModel->addStatusChange(
+                $id,
+                $order['status'],
+                $newStatus,
+                $notes,
+                session()->get('user_id')
+            );
+
+            return redirect()->to("/admin/orders/{$id}")
+                ->with('success', 'Order status updated successfully');
+        }
+
+        return redirect()->back()->with('error', 'Failed to update order status');
+    }
+
+    public function assignTechnician($id): RedirectResponse
+    {
+        $order = $this->orderModel->find($id);
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        $technicianId = $this->request->getPost('technician_id');
+
+        if ($this->orderModel->update($id, ['technician_id' => $technicianId])) {
+            // Log assignment
+            $historyModel = new OrderStatusHistoryModel();
+            $technician = $this->userModel->find($technicianId);
+            $historyModel->addStatusChange(
+                $id,
+                $order['status'],
+                $order['status'],
+                'Assigned to technician: ' . $technician['full_name'],
+                session()->get('user_id')
+            );
+
+            return redirect()->to("/admin/orders/{$id}")
+                ->with('success', 'Technician assigned successfully');
+        }
+
+        return redirect()->back()->with('error', 'Failed to assign technician');
     }
 
     /**
@@ -407,21 +450,6 @@ class OrderController extends BaseController
         $email->setMessage($message);
 
         return $email->send();
-    }
-
-    public function delete($id): RedirectResponse
-    {
-        $order = $this->orderModel->find($id);
-
-        if (!$order) {
-            throw new PageNotFoundException('Order not found');
-        }
-
-        if ($this->orderModel->delete($id)) {
-            return redirect()->to('/admin/orders')->with('success', 'Order deleted successfully');
-        }
-
-        return redirect()->back()->with('error', 'Failed to delete order');
     }
 
     /**
@@ -709,216 +737,6 @@ class OrderController extends BaseController
     }
 
     /**
-     * Show diagnosis form
-     */
-    public function diagnosis($id): string
-    {
-        $order = $this->orderModel->getDiagnosisDetails($id);
-
-        if (!$order) {
-            throw new PageNotFoundException('Order not found');
-        }
-
-        // Check if order can be diagnosed
-        if (!in_array($order['status'], ['received', 'diagnosed'])) {
-            return redirect()->to("/admin/orders/{$id}")
-                ->with('error', 'This order cannot be diagnosed at current status');
-        }
-
-        $data = [
-            'title' => 'Order Diagnosis',
-            'order' => $order,
-            'technicians' => $this->userModel->getTechnicians(),
-            'common_issues' => $this->getCommonIssues($order['device_type_id']),
-            'available_parts' => $this->partModel->where('status', 'active')->findAll()
-        ];
-
-        return view('admin/orders/diagnosis', $data);
-    }
-
-    /**
-     * Save diagnosis results
-     */
-    public function saveDiagnosis($id)
-    {
-        $order = $this->orderModel->find($id);
-
-        if (!$order) {
-            throw new PageNotFoundException('Order not found');
-        }
-
-        $rules = [
-            'diagnosis_notes' => 'required|min_length[10]',
-            'recommended_actions' => 'required|min_length[10]',
-            'estimated_hours' => 'permit_empty|decimal',
-            'estimated_cost' => 'permit_empty|decimal'
-        ];
-
-        if (!$this->validate($rules)) {
-            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
-        }
-
-        // Prepare issues found array
-        $issuesFound = [];
-        $issueInputs = $this->request->getPost('issues') ?? [];
-
-        foreach ($issueInputs as $issue) {
-            if (!empty($issue['description'])) {
-                $issuesFound[] = [
-                    'description' => $issue['description'],
-                    'severity' => $issue['severity'] ?? 'medium',
-                    'repair_needed' => $issue['repair_needed'] ?? true,
-                    'estimated_cost' => $issue['estimated_cost'] ?? 0
-                ];
-            }
-        }
-
-        $diagnosisData = [
-            'diagnosis_notes' => $this->request->getPost('diagnosis_notes'),
-            'issues_found' => $issuesFound,
-            'recommended_actions' => $this->request->getPost('recommended_actions'),
-            'estimated_hours' => $this->request->getPost('estimated_hours'),
-            'estimated_cost' => $this->request->getPost('estimated_cost')
-        ];
-
-        if ($this->orderModel->updateDiagnosis($id, $diagnosisData)) {
-            // Update order status to diagnosed
-            $this->orderModel->update($id, [
-                'status' => 'diagnosed',
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
-
-            // Log status change
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
-                $id,
-                $order['status'],
-                'diagnosed',
-                'Diagnosis completed: ' . $this->request->getPost('diagnosis_notes'),
-                session()->get('user_id')
-            );
-
-            // Check if should contact customer
-            if ($this->request->getPost('contact_customer')) {
-                return redirect()->to("/admin/orders/{$id}/contact-customer")
-                    ->with('success', 'Diagnosis saved successfully. Prepare customer contact.');
-            }
-
-            return redirect()->to("/admin/orders/{$id}")
-                ->with('success', 'Diagnosis completed successfully');
-        }
-
-        return redirect()->back()->with('error', 'Failed to save diagnosis');
-    }
-
-    /**
-     * Get common issues for device type
-     */
-    private function getCommonIssues($deviceTypeId): array
-    {
-        // You can store this in database or config
-        $commonIssues = [
-            1 => [ // Laptop
-                'Screen not working/cracked',
-                'Keyboard not responding',
-                'Battery not charging',
-                'Overheating issues',
-                'Hard drive failure',
-                'RAM issues',
-                'Motherboard problems',
-                'Power adapter issues'
-            ],
-            2 => [ // Desktop
-                'Won\'t turn on',
-                'Blue screen errors',
-                'Slow performance',
-                'Hard drive clicking',
-                'Graphics card issues',
-                'Memory problems',
-                'CPU overheating',
-                'Power supply failure'
-            ],
-            3 => [ // Phone
-                'Screen cracked/not responding',
-                'Battery drains quickly',
-                'Charging port issues',
-                'Camera not working',
-                'Speaker/microphone problems',
-                'Water damage',
-                'Software issues',
-                'Home button not working'
-            ]
-        ];
-
-        return $commonIssues[$deviceTypeId] ?? [
-            'Device not powering on',
-            'Performance issues',
-            'Hardware malfunction',
-            'Software problems',
-            'Physical damage'
-        ];
-    }
-
-    /**
-     * Show diagnosis list/queue
-     */
-    public function diagnosisQueue(): string
-    {
-        $orders = $this->orderModel->getOrdersNeedingDiagnosis();
-        $summary = $this->orderModel->getDiagnosisSummary();
-
-        $data = [
-            'title' => 'Diagnosis Queue',
-            'orders' => $orders,
-            'summary' => $summary,
-            'technicians' => $this->userModel->getTechnicians()
-        ];
-
-        return view('admin/orders/diagnosis_queue', $data);
-    }
-
-    /**
-     * Start diagnosis process
-     */
-    public function startDiagnosis($id)
-    {
-        $order = $this->orderModel->find($id);
-
-        if (!$order) {
-            throw new PageNotFoundException('Order not found');
-        }
-
-        // Check if order can be diagnosed
-        if (!in_array($order['status'], ['received', 'diagnosed'])) {
-            return redirect()->to("/admin/orders/{$id}")
-                ->with('error', 'This order cannot be diagnosed at current status');
-        }
-
-        // Update diagnosis status to in_progress
-        $updateData = [
-            'diagnosis_status' => 'in_progress',
-            'diagnosed_by' => session()->get('user_id')
-        ];
-
-        if ($this->orderModel->update($id, $updateData)) {
-            // Log the action in status history
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
-                $id,
-                $order['status'],
-                $order['status'], // Keep same status, just starting diagnosis
-                'Diagnosis started by technician',
-                session()->get('user_id')
-            );
-
-            return redirect()->to("/admin/orders/{$id}/diagnosis")
-                ->with('success', 'Diagnosis started. You can now input your findings.');
-        }
-
-        return redirect()->back()->with('error', 'Failed to start diagnosis');
-    }
-
-    /**
      * IMPROVED: Create quotation with better validation
      */
     public function createQuotation($id): string
@@ -981,9 +799,9 @@ class OrderController extends BaseController
         $rules = [
             'service_cost' => 'required|decimal|greater_than[0]',
             'parts_cost' => 'permit_empty|decimal',
-            'total_cost' => 'required|decimal|greater_than[0]',
             'estimated_duration' => 'required|min_length[3]',
             'valid_until' => 'required|valid_date'
+            // REMOVE 'total_cost' dari rules karena akan dihitung otomatis
         ];
 
         if (!$this->validate($rules)) {
@@ -996,17 +814,44 @@ class OrderController extends BaseController
             return redirect()->back()->withInput()->with('error', 'Valid until date must be in the future');
         }
 
+        // Manual calculate totals
+        $serviceCost = (float)$this->request->getPost('service_cost');
+        $partsCost = (float)($this->request->getPost('parts_cost') ?: 0);
+        $additionalCost = (float)($this->request->getPost('additional_cost') ?: 0);
+        $discountAmount = (float)($this->request->getPost('discount_amount') ?: 0);
+        $discountPercentage = (float)($this->request->getPost('discount_percentage') ?: 0);
+        $taxPercentage = (float)($this->request->getPost('tax_percentage') ?: 0);
+
+        // Calculate subtotal
+        $subtotal = $serviceCost + $partsCost + $additionalCost;
+
+        // Apply percentage discount if set
+        if ($discountPercentage > 0) {
+            $discountAmount = ($subtotal * $discountPercentage) / 100;
+        }
+
+        // Subtotal after discount
+        $afterDiscount = $subtotal - $discountAmount;
+
+        // Calculate tax
+        $taxAmount = ($afterDiscount * $taxPercentage) / 100;
+
+        // Final total
+        $totalCost = $afterDiscount + $taxAmount;
+
         // Check if quotation already exists
         $existingQuotation = $this->quotationModel->getQuotationByOrder($id);
 
         $quotationData = [
             'order_id' => $id,
-            'service_cost' => (float)$this->request->getPost('service_cost'),
-            'parts_cost' => (float)($this->request->getPost('parts_cost') ?: 0),
-            'additional_cost' => (float)($this->request->getPost('additional_cost') ?: 0),
-            'discount_amount' => (float)($this->request->getPost('discount_amount') ?: 0),
-            'discount_percentage' => (float)($this->request->getPost('discount_percentage') ?: 0),
-            'tax_percentage' => (float)($this->request->getPost('tax_percentage') ?: 0),
+            'service_cost' => $serviceCost,
+            'parts_cost' => $partsCost,
+            'additional_cost' => $additionalCost,
+            'discount_amount' => $discountAmount,
+            'discount_percentage' => $discountPercentage,
+            'tax_percentage' => $taxPercentage,
+            'tax_amount' => $taxAmount,  // TAMBAHKAN INI
+            'total_cost' => $totalCost,   // TAMBAHKAN INI
             'estimated_duration' => $this->request->getPost('estimated_duration'),
             'warranty_period' => $this->request->getPost('warranty_period'),
             'terms_conditions' => $this->request->getPost('terms_conditions'),

@@ -39,6 +39,7 @@ class QuotationModel extends Model
      */
     protected function calculateTotals(array $data): array
     {
+        log_message('debug', 'calculateTotals called with data: ' . json_encode($data));
         if (isset($data['data'])) {
             $quotation = $data['data'];
 

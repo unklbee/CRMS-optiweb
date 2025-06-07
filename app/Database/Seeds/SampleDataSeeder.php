@@ -51,7 +51,6 @@ class SampleDataSeeder extends Seeder
                 'technician_id'        => 1,              // merujuk ke users.id = 2 (John Doe)
                 'priority'             => 'normal',
                 'status'               => 'in_progress',
-                'estimated_cost'       => 650000.00,
                 'final_cost'           => 0.00,           // nanti di‐update setelah kerja selesai
                 'estimated_completion' => date('Y-m-d H:i:s', strtotime('+2 days')),
                 'completed_at'         => null,           // belum selesai
@@ -71,7 +70,6 @@ class SampleDataSeeder extends Seeder
                 'technician_id'        => 1,              // merujuk ke users.id = 3 (Jane Smith)
                 'priority'             => 'high',
                 'status'               => 'completed',
-                'estimated_cost'       => 225000.00,
                 'final_cost'           => 225000.00,      // biaya akhir sama dengan estimasi
                 'estimated_completion' => null,
                 'completed_at'         => date('Y-m-d H:i:s', strtotime('-1 day')), // selesai kemarin
@@ -91,7 +89,6 @@ class SampleDataSeeder extends Seeder
                 'technician_id'        => 1,           // belum ditugaskan teknisi
                 'priority'             => 'urgent',
                 'status'               => 'received',
-                'estimated_cost'       => 0.00,           // akan diisi setelah diagnosa
                 'final_cost'           => 0.00,
                 'estimated_completion' => null,
                 'completed_at'         => null,

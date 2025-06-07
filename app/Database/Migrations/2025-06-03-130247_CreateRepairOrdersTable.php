@@ -62,13 +62,8 @@ class CreateRepairOrdersTable extends Migration
             ],
             'status' => [
                 'type' => 'ENUM',
-                'constraint' => ['received', 'diagnosed', 'waiting_approval', 'in_progress', 'waiting_parts', 'completed', 'delivered', 'cancelled'],
+                'constraint' => ['received', 'diagnosed', 'waiting_approval', 'approved', 'in_progress', 'waiting_parts', 'completed', 'delivered', 'cancelled'],
                 'default' => 'received',
-            ],
-            'estimated_cost' => [
-                'type' => 'DECIMAL',
-                'constraint' => '10,2',
-                'default' => 0,
             ],
             'final_cost' => [
                 'type' => 'DECIMAL',
@@ -87,6 +82,47 @@ class CreateRepairOrdersTable extends Migration
                 'type' => 'TEXT',
                 'null' => true,
             ],
+
+            // NEW: Diagnosis-specific fields
+            'diagnosis_status' => [
+                'type' => 'ENUM',
+                'constraint' => ['pending', 'in_progress', 'completed'],
+                'default' => 'pending',
+            ],
+            'diagnosis_notes' => [
+                'type' => 'TEXT',
+                'null' => true,
+            ],
+            'issues_found' => [
+                'type' => 'JSON',
+                'null' => true,
+            ],
+            'recommended_actions' => [
+                'type' => 'TEXT',
+                'null' => true,
+            ],
+            'estimated_hours' => [
+                'type' => 'DECIMAL',
+                'constraint' => '5,2',
+                'null' => true,
+                'comment' => 'Estimated hours for repair work (for time tracking, not cost)'
+            ],
+            'diagnosis_date' => [
+                'type' => 'DATETIME',
+                'null' => true,
+            ],
+            'diagnosed_by' => [
+                'type' => 'INT',
+                'constraint' => 11,
+                'unsigned' => true,
+                'null' => true,
+            ],
+            'customer_contacted' => [
+                'type' => 'BOOLEAN',
+                'default' => false,
+                'comment' => 'Whether customer has been contacted about diagnosis'
+            ],
+
             'created_at' => [
                 'type' => 'DATETIME',
                 'null' => true,
@@ -99,9 +135,22 @@ class CreateRepairOrdersTable extends Migration
 
         $this->forge->addPrimaryKey('id');
         $this->forge->addUniqueKey('order_number');
+
+        // Indexes for better performance
+        $this->forge->addKey('status');
+        $this->forge->addKey('diagnosis_status');
+        $this->forge->addKey('priority');
+        $this->forge->addKey('technician_id');
+        $this->forge->addKey('diagnosed_by');
+        $this->forge->addKey('created_at');
+        $this->forge->addKey('diagnosis_date');
+
+        // Foreign keys
         $this->forge->addForeignKey('customer_id', 'customers', 'id', 'CASCADE', 'CASCADE');
         $this->forge->addForeignKey('device_type_id', 'device_types', 'id');
         $this->forge->addForeignKey('technician_id', 'users', 'id', 'SET NULL', 'CASCADE');
+        $this->forge->addForeignKey('diagnosed_by', 'users', 'id', 'SET NULL', 'CASCADE');
+
         $this->forge->createTable('repair_orders');
     }
 
