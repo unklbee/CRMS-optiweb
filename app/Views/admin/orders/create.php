@@ -109,7 +109,7 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
                         <select name="priority" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            <option value="normal" <?= old('priority') == 'normal' ? 'selected' : '' ?>>Normal</option>
+                            <option value="normal" <?= old('priority') == 'medium' ? 'selected' : '' ?>>Medium</option>
                             <option value="high" <?= old('priority') == 'high' ? 'selected' : '' ?>>High</option>
                             <option value="urgent" <?= old('priority') == 'urgent' ? 'selected' : '' ?>>Urgent</option>
                             <option value="low" <?= old('priority') == 'low' ? 'selected' : '' ?>>Low</option>

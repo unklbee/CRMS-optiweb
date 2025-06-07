@@ -6,6 +6,8 @@ use App\Controllers\BaseController;
 use App\Models\QuotationModel;
 use App\Models\RepairOrderModel;
 use App\Models\OrderStatusHistoryModel;
+use App\Models\OrderPartModel;
+use App\Models\CustomerModel;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -14,15 +16,25 @@ class QuotationController extends BaseController
 {
     protected QuotationModel $quotationModel;
     protected RepairOrderModel $orderModel;
+    protected OrderStatusHistoryModel $historyModel;
+    protected OrderPartModel $orderPartModel;
+    protected CustomerModel $customerModel;
 
     public function __construct()
     {
         $this->quotationModel = new QuotationModel();
         $this->orderModel = new RepairOrderModel();
+        $this->historyModel = new OrderStatusHistoryModel();
+        $this->orderPartModel = new OrderPartModel();
+        $this->customerModel = new CustomerModel();
     }
 
+    // ============================================================================
+    // MAIN QUOTATION MANAGEMENT
+    // ============================================================================
+
     /**
-     * List all quotations
+     * List all quotations with filtering
      */
     public function index(): string
     {
@@ -82,324 +94,352 @@ class QuotationController extends BaseController
     }
 
     /**
-     * Show quotation to customer (public view)
+     * Show quotation details (admin view)
      */
-    public function view($quotationId): string
+    public function show($id): string
     {
-        $quotation = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
 
         if (!$quotation) {
             throw new PageNotFoundException('Quotation not found');
         }
 
-        // Check if quotation is accessible (not draft)
-        if ($quotation['status'] === 'draft') {
-            throw new PageNotFoundException('Quotation not available');
-        }
-
-        // Check if expired and update status
-        if ($quotation['status'] === 'sent' && strtotime($quotation['valid_until']) < time()) {
-            $this->quotationModel->update($quotationId, ['status' => 'expired']);
-            $quotation['status'] = 'expired';
-        }
+        // Get order parts
+        $orderParts = $this->orderPartModel->getOrderParts($quotation['order_id']);
 
         $data = [
-            'title' => 'Quotation - ' . $quotation['quotation_number'],
+            'title' => 'Quotation Details - ' . $quotation['quotation_number'],
             'quotation' => $quotation,
-            'shop_info' => [
-                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
-                'address' => get_site_setting('address', ''),
-                'phone' => get_site_setting('contact_phone', ''),
-                'email' => get_site_setting('contact_email', ''),
-            ]
+            'order_parts' => $orderParts,
+            'print_mode' => $this->request->getGet('print') === '1'
         ];
 
-        return view('quotation/view', $data);
+        return view('admin/quotations/show', $data);
+    }
+
+    // ============================================================================
+    // ORDER-BASED QUOTATION MANAGEMENT
+    // ============================================================================
+
+    /**
+     * Create quotation form for specific order
+     */
+    public function create($orderId): string
+    {
+        $order = $this->orderModel->select('
+                repair_orders.*,
+                customers.full_name as customer_name,
+                customers.phone as customer_phone,
+                customers.email as customer_email,
+                device_types.name as device_type_name
+            ')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->where('repair_orders.id', $orderId)
+            ->first();
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        // Check if quotation already exists
+        $existingQuotation = $this->quotationModel->where('order_id', $orderId)->first();
+        if ($existingQuotation) {
+            return redirect()->to("/admin/quotations/{$existingQuotation['id']}")
+                ->with('info', 'Quotation already exists for this order');
+        }
+
+        // Get order parts for quotation calculation
+        $orderParts = $this->orderPartModel->getOrderParts($orderId);
+
+        $partsTotal = 0;
+        foreach ($orderParts as $part) {
+            $partsTotal += $part['total_price'];
+        }
+
+        $data = [
+            'title' => 'Create Quotation - Order #' . $order['order_number'],
+            'order' => $order,
+            'order_parts' => $orderParts,
+            'parts_total' => $partsTotal
+        ];
+
+        return view('admin/quotations/create', $data);
     }
 
     /**
-     * Handle customer quotation approval
+     * Store new quotation for order
      */
-    public function approve($quotationId)
+    public function store($orderId): RedirectResponse
     {
-        $quotation = $this->quotationModel->find($quotationId);
+        $order = $this->orderModel->find($orderId);
+
+        if (!$order) {
+            throw new PageNotFoundException('Order not found');
+        }
+
+        $rules = [
+            'labor_cost' => 'required|decimal',
+            'notes' => 'permit_empty',
+            'valid_days' => 'permit_empty|integer|greater_than[0]'
+        ];
+
+        if (!$this->validate($rules)) {
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // Calculate parts total
+        $orderParts = $this->orderPartModel->getOrderParts($orderId);
+        $partsTotal = 0;
+        foreach ($orderParts as $part) {
+            $partsTotal += $part['total_price'];
+        }
+
+        $laborCost = (float)$this->request->getPost('labor_cost');
+        $totalCost = $partsTotal + $laborCost;
+        $validDays = (int)($this->request->getPost('valid_days') ?? 7);
+
+        $quotationData = [
+            'order_id' => $orderId,
+            'quotation_number' => $this->generateQuotationNumber(),
+            'parts_cost' => $partsTotal,
+            'labor_cost' => $laborCost,
+            'total_cost' => $totalCost,
+            'notes' => $this->request->getPost('notes'),
+            'status' => 'draft',
+            'valid_until' => date('Y-m-d', strtotime("+{$validDays} days")),
+            'created_by' => session()->get('user_id')
+        ];
+
+        if ($quotationId = $this->quotationModel->insert($quotationData, true)) {
+            return redirect()->to("/admin/quotations/{$quotationId}")
+                ->with('success', 'Quotation created successfully');
+        }
+
+        return redirect()->back()->withInput()->with('error', 'Failed to create quotation');
+    }
+
+    /**
+     * Show quotation for specific order
+     */
+    public function showOrderQuotation($orderId): string
+    {
+        $quotation = $this->quotationModel->where('order_id', $orderId)->first();
+
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found for this order');
+        }
+
+        return redirect()->to("/admin/quotations/{$quotation['id']}");
+    }
+
+    /**
+     * Edit quotation for specific order
+     */
+    public function editOrderQuotation($orderId): string
+    {
+        $quotation = $this->quotationModel->where('order_id', $orderId)->first();
+
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found for this order');
+        }
+
+        return redirect()->to("/admin/quotations/{$quotation['id']}/edit");
+    }
+
+    /**
+     * Edit quotation
+     */
+    public function edit($id): string
+    {
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
 
         if (!$quotation) {
             throw new PageNotFoundException('Quotation not found');
         }
 
-        // Validate quotation can be approved
-        if (!in_array($quotation['status'], ['sent'])) {
-            return redirect()->to("/quotation/{$quotationId}")
-                ->with('error', 'This quotation cannot be approved at its current status.');
+        // Cannot edit approved or rejected quotations
+        if (in_array($quotation['status'], ['approved', 'rejected'])) {
+            return redirect()->to("/admin/quotations/{$id}")
+                ->with('error', 'Cannot edit quotation in current status');
         }
 
-        // Check if expired
-        if (strtotime($quotation['valid_until']) < time()) {
-            $this->quotationModel->update($quotationId, ['status' => 'expired']);
-            return redirect()->to("/quotation/{$quotationId}")
-                ->with('error', 'This quotation has expired and cannot be approved.');
-        }
-
-        if ($this->request->getMethod() === 'POST') {
-            $customerNotes = $this->request->getPost('customer_notes');
-
-            // Approve quotation
-            if ($this->quotationModel->approveQuotation($quotationId, $customerNotes)) {
-                // Update order status to in_progress
-                $this->orderModel->update($quotation['order_id'], [
-                    'status' => 'in_progress',
-                    'final_cost' => $quotation['total_cost'],
-                    'updated_at' => date('Y-m-d H:i:s')
-                ]);
-
-                // Log status change
-                $historyModel = new OrderStatusHistoryModel();
-                $historyModel->addStatusChange(
-                    $quotation['order_id'],
-                    'waiting_approval',
-                    'in_progress',
-                    'Customer approved quotation. Repair work can begin. Customer notes: ' . ($customerNotes ?: 'None'),
-                    null // No user ID for customer actions
-                );
-
-                // Send confirmation email to admin
-                $this->sendApprovalNotificationToAdmin($quotation, $customerNotes);
-
-                return redirect()->to("/quotation/{$quotationId}")
-                    ->with('success', 'Quotation approved successfully! We will begin the repair work shortly.');
-            }
-
-            return redirect()->back()->with('error', 'Failed to approve quotation. Please try again.');
-        }
-
-        // Show approval form (GET request)
-        $quotationDetails = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
+        $orderParts = $this->orderPartModel->getOrderParts($quotation['order_id']);
 
         $data = [
-            'title' => 'Approve Quotation',
-            'quotation' => $quotationDetails,
-            'action' => 'approve',
-            'shop_info' => [
-                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
-                'address' => get_site_setting('address', ''),
-                'phone' => get_site_setting('contact_phone', ''),
-                'email' => get_site_setting('contact_email', ''),
-            ]
-        ];
-
-        return view('quotation/approval_form', $data);
-    }
-
-    /**
-     * Handle customer quotation rejection
-     */
-    public function reject($quotationId)
-    {
-        $quotation = $this->quotationModel->find($quotationId);
-
-        if (!$quotation) {
-            throw new PageNotFoundException('Quotation not found');
-        }
-
-        // Validate quotation can be rejected
-        if (!in_array($quotation['status'], ['sent'])) {
-            return redirect()->to("/quotation/{$quotationId}")
-                ->with('error', 'This quotation cannot be rejected at its current status.');
-        }
-
-        if ($this->request->getMethod() === 'POST') {
-            $customerNotes = $this->request->getPost('customer_notes');
-
-            if (empty($customerNotes)) {
-                return redirect()->back()
-                    ->withInput()
-                    ->with('error', 'Please provide a reason for rejecting this quotation.');
-            }
-
-            // Reject quotation
-            if ($this->quotationModel->rejectQuotation($quotationId, $customerNotes)) {
-                // Update order status back to diagnosed
-                $this->orderModel->update($quotation['order_id'], [
-                    'status' => 'diagnosed',
-                    'updated_at' => date('Y-m-d H:i:s')
-                ]);
-
-                // Log status change
-                $historyModel = new OrderStatusHistoryModel();
-                $historyModel->addStatusChange(
-                    $quotation['order_id'],
-                    'waiting_approval',
-                    'diagnosed',
-                    'Customer rejected quotation. Reason: ' . $customerNotes,
-                    null // No user ID for customer actions
-                );
-
-                // Send rejection notification to admin
-                $this->sendRejectionNotificationToAdmin($quotation, $customerNotes);
-
-                return redirect()->to("/quotation/{$quotationId}")
-                    ->with('success', 'Quotation declined. We will contact you to discuss alternatives.');
-            }
-
-            return redirect()->back()->with('error', 'Failed to reject quotation. Please try again.');
-        }
-
-        // Show rejection form (GET request)
-        $quotationDetails = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
-
-        $data = [
-            'title' => 'Decline Quotation',
-            'quotation' => $quotationDetails,
-            'action' => 'reject',
-            'shop_info' => [
-                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
-                'address' => get_site_setting('address', ''),
-                'phone' => get_site_setting('contact_phone', ''),
-                'email' => get_site_setting('contact_email', ''),
-            ]
-        ];
-
-        return view('quotation/approval_form', $data);
-    }
-
-    /**
-     * Download quotation as PDF
-     */
-    public function downloadPdf($quotationId)
-    {
-        $quotation = $this->quotationModel->getQuotationWithOrderDetails($quotationId);
-
-        if (!$quotation) {
-            throw new PageNotFoundException('Quotation not found');
-        }
-
-        // Check if quotation is accessible
-        if ($quotation['status'] === 'draft') {
-            throw new PageNotFoundException('Quotation not available');
-        }
-
-        $data = [
-            'title' => 'Quotation - ' . $quotation['quotation_number'],
+            'title' => 'Edit Quotation - ' . $quotation['quotation_number'],
             'quotation' => $quotation,
-            'print_mode' => true,
-            'shop_info' => [
-                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
-                'address' => get_site_setting('address', ''),
-                'phone' => get_site_setting('contact_phone', ''),
-                'email' => get_site_setting('contact_email', ''),
-            ]
+            'order_parts' => $orderParts
         ];
 
-        return view('quotation/pdf', $data);
+        return view('admin/quotations/edit', $data);
     }
 
     /**
-     * Send rejection notification to admin
+     * Update quotation
      */
-    private function sendRejectionNotificationToAdmin($quotation, $customerNotes): bool
+    public function update($id): RedirectResponse
     {
-        $email = \Config\Services::email();
-
-        $adminEmail = get_site_setting('admin_email');
-        if (!$adminEmail) {
-            return false;
-        }
-
-        $subject = "Quotation Rejected - {$quotation['quotation_number']}";
-        $message = view('emails/quotation_rejected_admin', [
-            'quotation' => $quotation,
-            'customer_notes' => $customerNotes
-        ]);
-
-        $email->setTo($adminEmail);
-        $email->setSubject($subject);
-        $email->setMessage($message);
-
-        return $email->send();
-    }
-
-    /**
-     * Check quotation status (AJAX endpoint)
-     */
-    public function checkStatus($quotationId): ResponseInterface
-    {
-        $quotation = $this->quotationModel->find($quotationId);
+        $quotation = $this->quotationModel->find($id);
 
         if (!$quotation) {
-            return $this->response->setJSON([
-                'success' => false,
-                'message' => 'Quotation not found'
+            throw new PageNotFoundException('Quotation not found');
+        }
+
+        // Cannot edit approved or rejected quotations
+        if (in_array($quotation['status'], ['approved', 'rejected'])) {
+            return redirect()->back()->with('error', 'Cannot edit quotation in current status');
+        }
+
+        $rules = [
+            'labor_cost' => 'required|decimal',
+            'notes' => 'permit_empty',
+            'valid_days' => 'permit_empty|integer|greater_than[0]'
+        ];
+
+        if (!$this->validate($rules)) {
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // Recalculate totals
+        $orderParts = $this->orderPartModel->getOrderParts($quotation['order_id']);
+        $partsTotal = 0;
+        foreach ($orderParts as $part) {
+            $partsTotal += $part['total_price'];
+        }
+
+        $laborCost = (float)$this->request->getPost('labor_cost');
+        $totalCost = $partsTotal + $laborCost;
+
+        $updateData = [
+            'parts_cost' => $partsTotal,
+            'labor_cost' => $laborCost,
+            'total_cost' => $totalCost,
+            'notes' => $this->request->getPost('notes')
+        ];
+
+        // Update valid until if provided
+        $validDays = $this->request->getPost('valid_days');
+        if ($validDays) {
+            $updateData['valid_until'] = date('Y-m-d', strtotime("+{$validDays} days"));
+        }
+
+        if ($this->quotationModel->update($id, $updateData)) {
+            return redirect()->to("/admin/quotations/{$id}")
+                ->with('success', 'Quotation updated successfully');
+        }
+
+        return redirect()->back()->withInput()->with('error', 'Failed to update quotation');
+    }
+
+    /**
+     * Delete quotation
+     */
+    public function delete($id): RedirectResponse
+    {
+        $quotation = $this->quotationModel->find($id);
+
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found');
+        }
+
+        // Cannot delete approved quotations
+        if ($quotation['status'] === 'approved') {
+            return redirect()->back()->with('error', 'Cannot delete approved quotation');
+        }
+
+        if ($this->quotationModel->delete($id)) {
+            return redirect()->to('/admin/quotations')
+                ->with('success', 'Quotation deleted successfully');
+        }
+
+        return redirect()->back()->with('error', 'Failed to delete quotation');
+    }
+
+    // ============================================================================
+    // QUOTATION ACTIONS
+    // ============================================================================
+
+    /**
+     * Send quotation to customer
+     */
+    public function send($id): RedirectResponse
+    {
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
+
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found');
+        }
+
+        if ($quotation['status'] !== 'draft') {
+            return redirect()->back()->with('error', 'Only draft quotations can be sent');
+        }
+
+        if (!$quotation['customer_email']) {
+            return redirect()->back()->with('error', 'Customer email not available');
+        }
+
+        // Send email
+        if ($this->sendQuotationEmail($quotation)) {
+            // Update status to sent
+            $this->quotationModel->update($id, [
+                'status' => 'sent',
+                'sent_at' => date('Y-m-d H:i:s')
             ]);
+
+            // Update order status
+            $this->orderModel->update($quotation['order_id'], [
+                'status' => 'waiting_approval'
+            ]);
+
+            // Log status change
+            $this->historyModel->addStatusChange(
+                $quotation['order_id'],
+                $quotation['order_status'],
+                'waiting_approval',
+                'Quotation sent to customer for approval',
+                session()->get('user_id')
+            );
+
+            return redirect()->back()->with('success', 'Quotation sent to customer successfully');
         }
 
-        return $this->response->setJSON([
-            'success' => true,
-            'status' => $quotation['status'],
-            'valid_until' => $quotation['valid_until'],
-            'is_expired' => strtotime($quotation['valid_until']) < time()
-        ]);
+        return redirect()->back()->with('error', 'Failed to send quotation email');
     }
 
     /**
-     * Send approval notification to admin
+     * Download quotation PDF
      */
-    private function sendApprovalNotificationToAdmin($quotation, $customerNotes): bool
+    public function downloadPdf($id): ResponseInterface
     {
-        $email = \Config\Services::email();
+        $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
 
-        $adminEmail = get_site_setting('admin_email');
-        if (!$adminEmail) {
-            return false;
+        if (!$quotation) {
+            throw new PageNotFoundException('Quotation not found');
         }
 
-        $subject = "Quotation Approved - {$quotation['quotation_number']}";
-        $message = view('emails/quotation_approved_admin', [
+        $orderParts = $this->orderPartModel->getOrderParts($quotation['order_id']);
+
+        // Generate PDF (using TCPDF or similar)
+        $html = view('admin/quotations/pdf', [
             'quotation' => $quotation,
-            'customer_notes' => $customerNotes
+            'order_parts' => $orderParts,
+            'shop_info' => [
+                'name' => get_site_setting('site_name', 'Computer Repair Shop'),
+                'address' => get_site_setting('address', ''),
+                'phone' => get_site_setting('contact_phone', ''),
+                'email' => get_site_setting('contact_email', ''),
+            ]
         ]);
 
-        $email->setTo($adminEmail);
-        $email->setSubject($subject);
-        $email->setMessage($message);
-
-        return $email->send();
+        // For now, return HTML view - implement PDF generation as needed
+        return $this->response
+            ->setHeader('Content-Type', 'text/html')
+            ->setBody($html);
     }
 
     /**
-     * Show pending quotations
-     */
-    public function pending(): string
-    {
-        $quotations = $this->quotationModel->getPendingQuotations();
-
-        $data = [
-            'title' => 'Pending Quotations',
-            'quotations' => $quotations,
-            'page_type' => 'pending'
-        ];
-
-        return view('admin/quotations/pending', $data);
-    }
-
-    /**
-     * Show expired quotations
-     */
-    public function expired(): string
-    {
-        $quotations = $this->quotationModel->getExpiredQuotations();
-
-        $data = [
-            'title' => 'Expired Quotations',
-            'quotations' => $quotations,
-            'page_type' => 'expired'
-        ];
-
-        return view('admin/quotations/expired', $data);
-    }
-
-    /**
-     * Duplicate quotation for new revision
+     * Duplicate quotation
      */
     public function duplicate($id): RedirectResponse
     {
@@ -413,7 +453,7 @@ class QuotationController extends BaseController
         $duplicateData = $quotation;
         unset($duplicateData['id']);
         $duplicateData['status'] = 'draft';
-        $duplicateData['quotation_number'] = null; // Will be auto-generated
+        $duplicateData['quotation_number'] = $this->generateQuotationNumber();
         $duplicateData['sent_at'] = null;
         $duplicateData['responded_at'] = null;
         $duplicateData['customer_notes'] = null;
@@ -422,7 +462,7 @@ class QuotationController extends BaseController
         $duplicateData['created_at'] = date('Y-m-d H:i:s');
         $duplicateData['updated_at'] = date('Y-m-d H:i:s');
 
-        $newQuotationId = $this->quotationModel->insert($duplicateData);
+        $newQuotationId = $this->quotationModel->insert($duplicateData, true);
 
         if ($newQuotationId) {
             return redirect()->to("/admin/quotations/{$newQuotationId}")
@@ -433,7 +473,7 @@ class QuotationController extends BaseController
     }
 
     /**
-     * Send quotation reminder
+     * Send reminder to customer
      */
     public function sendReminder($id): RedirectResponse
     {
@@ -452,16 +492,7 @@ class QuotationController extends BaseController
         }
 
         // Send reminder email
-        $email = \Config\Services::email();
-
-        $subject = "Reminder: Quotation #{$quotation['quotation_number']} - Awaiting Your Response";
-        $message = view('emails/quotation_reminder', ['quotation' => $quotation]);
-
-        $email->setTo($quotation['customer_email']);
-        $email->setSubject($subject);
-        $email->setMessage($message);
-
-        if ($email->send()) {
+        if ($this->sendReminderEmail($quotation)) {
             return redirect()->back()->with('success', 'Reminder sent to customer successfully');
         }
 
@@ -469,7 +500,7 @@ class QuotationController extends BaseController
     }
 
     /**
-     * Mark quotation as expired manually
+     * Mark quotation as expired
      */
     public function markExpired($id): RedirectResponse
     {
@@ -480,12 +511,11 @@ class QuotationController extends BaseController
         }
 
         if ($this->quotationModel->update($id, ['status' => 'expired'])) {
-            // Log status change in order history
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
+            // Log status change
+            $this->historyModel->addStatusChange(
                 $quotation['order_id'],
                 'waiting_approval',
-                'received', // Return to received status
+                'received',
                 'Quotation expired - customer did not respond within valid period',
                 session()->get('user_id')
             );
@@ -503,92 +533,199 @@ class QuotationController extends BaseController
     }
 
     /**
-     * Convert quotation to invoice (when approved)
+     * Revise quotation (create new version)
      */
-    public function convertToInvoice($id): RedirectResponse
+    public function reviseQuotation($orderId): RedirectResponse
     {
-        $quotation = $this->quotationModel->find($id);
+        $existingQuotation = $this->quotationModel->where('order_id', $orderId)->first();
 
-        if (!$quotation) {
-            throw new PageNotFoundException('Quotation not found');
+        if (!$existingQuotation) {
+            throw new PageNotFoundException('Original quotation not found');
         }
 
-        if ($quotation['status'] !== 'approved') {
-            return redirect()->back()->with('error', 'Only approved quotations can be converted to invoice');
-        }
+        // Mark existing quotation as superseded
+        $this->quotationModel->update($existingQuotation['id'], ['status' => 'superseded']);
 
-        // Update order with final costs
-        $orderUpdateData = [
-            'estimated_cost' => $quotation['total_cost'],
-            'final_cost' => $quotation['total_cost'],
-            'status' => 'in_progress',
-            'updated_at' => date('Y-m-d H:i:s')
+        // Redirect to create new quotation
+        return redirect()->to("/admin/orders/{$orderId}/create-quotation")
+            ->with('info', 'Previous quotation superseded. Create new revision.');
+    }
+
+    // ============================================================================
+    // SPECIALIZED VIEWS
+    // ============================================================================
+
+    /**
+     * Show pending quotations
+     */
+    public function pending(): string
+    {
+        $quotations = $this->quotationModel->select('
+                quotations.*,
+                repair_orders.order_number,
+                customers.full_name as customer_name,
+                customers.phone as customer_phone,
+                device_types.name as device_type_name
+            ')
+            ->join('repair_orders', 'repair_orders.id = quotations.order_id')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->where('quotations.status', 'sent')
+            ->where('quotations.valid_until >=', date('Y-m-d'))
+            ->orderBy('quotations.sent_at', 'ASC')
+            ->findAll();
+
+        $data = [
+            'title' => 'Pending Quotations',
+            'quotations' => $quotations,
+            'page_type' => 'pending'
         ];
 
-        if ($this->orderModel->update($quotation['order_id'], $orderUpdateData)) {
-            // Log status change
-            $historyModel = new OrderStatusHistoryModel();
-            $historyModel->addStatusChange(
-                $quotation['order_id'],
-                'waiting_approval',
-                'in_progress',
-                'Quotation approved by customer - repair work can begin',
-                session()->get('user_id')
-            );
-
-            return redirect()->to("/admin/orders/{$quotation['order_id']}")
-                ->with('success', 'Quotation converted to active work order');
-        }
-
-        return redirect()->back()->with('error', 'Failed to convert quotation');
+        return view('admin/quotations/pending', $data);
     }
 
     /**
-     * Generate quotation analytics
+     * Show expired quotations
+     */
+    public function expired(): string
+    {
+        $quotations = $this->quotationModel->select('
+                quotations.*,
+                repair_orders.order_number,
+                customers.full_name as customer_name,
+                customers.phone as customer_phone,
+                device_types.name as device_type_name
+            ')
+            ->join('repair_orders', 'repair_orders.id = quotations.order_id')
+            ->join('customers', 'customers.id = repair_orders.customer_id')
+            ->join('device_types', 'device_types.id = repair_orders.device_type_id')
+            ->where('quotations.status', 'sent')
+            ->where('quotations.valid_until <', date('Y-m-d'))
+            ->orderBy('quotations.valid_until', 'DESC')
+            ->findAll();
+
+        $data = [
+            'title' => 'Expired Quotations',
+            'quotations' => $quotations,
+            'page_type' => 'expired'
+        ];
+
+        return view('admin/quotations/expired', $data);
+    }
+
+    /**
+     * Show quotation analytics
      */
     public function analytics(): string
     {
-        // Get quotation statistics
         $stats = $this->quotationModel->getQuotationStats();
 
-        // Get conversion rates
-        $totalSent = $this->quotationModel->where('status', 'sent')->countAllResults();
-        $totalApproved = $this->quotationModel->where('status', 'approved')->countAllResults();
-        $totalRejected = $this->quotationModel->where('status', 'rejected')->countAllResults();
+        // Calculate conversion rates
+        $totalSent = $stats['sent'];
+        $totalApproved = $stats['approved'];
+        $totalRejected = $stats['rejected'];
 
         $conversionRate = $totalSent > 0 ? ($totalApproved / $totalSent) * 100 : 0;
         $rejectionRate = $totalSent > 0 ? ($totalRejected / $totalSent) * 100 : 0;
 
-        // Get average quotation values
+        // Get average quotation value
         $avgQuotationValue = $this->quotationModel->selectAvg('total_cost', 'avg_value')
             ->where('status !=', 'draft')
             ->first()['avg_value'] ?? 0;
 
-        // Get monthly quotation trends (last 6 months)
-        $monthlyTrends = [];
-        for ($i = 5; $i >= 0; $i--) {
-            $month = date('Y-m', strtotime("-{$i} months"));
-            $monthlyTrends[] = [
-                'month' => date('M Y', strtotime("-{$i} months")),
-                'sent' => $this->quotationModel->where('DATE_FORMAT(created_at, "%Y-%m")', $month)
-                    ->where('status !=', 'draft')
-                    ->countAllResults(),
-                'approved' => $this->quotationModel->where('DATE_FORMAT(created_at, "%Y-%m")', $month)
-                    ->where('status', 'approved')
-                    ->countAllResults(),
-            ];
-        }
+        // Get monthly data for charts
+        $monthlyData = $this->quotationModel->select('
+                MONTH(created_at) as month,
+                YEAR(created_at) as year,
+                COUNT(*) as total_quotations,
+                SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as approved_count,
+                SUM(CASE WHEN status = "approved" THEN total_cost ELSE 0 END) as approved_value
+            ')
+            ->where('created_at >=', date('Y-01-01'))
+            ->groupBy('YEAR(created_at), MONTH(created_at)')
+            ->orderBy('year, month')
+            ->findAll();
 
         $data = [
             'title' => 'Quotation Analytics',
             'stats' => $stats,
-            'conversion_rate' => $conversionRate,
-            'rejection_rate' => $rejectionRate,
+            'conversion_rate' => round($conversionRate, 2),
+            'rejection_rate' => round($rejectionRate, 2),
             'avg_quotation_value' => $avgQuotationValue,
-            'monthly_trends' => $monthlyTrends
+            'monthly_data' => $monthlyData
         ];
 
         return view('admin/quotations/analytics', $data);
+    }
+
+    /**
+     * Export quotations to CSV
+     */
+    public function export(): ResponseInterface
+    {
+        $status = $this->request->getGet('status');
+        $dateFrom = $this->request->getGet('date_from');
+        $dateTo = $this->request->getGet('date_to');
+
+        $builder = $this->quotationModel->select('
+                quotations.quotation_number,
+                repair_orders.order_number,
+                customers.full_name as customer_name,
+                customers.phone as customer_phone,
+                customers.email as customer_email,
+                quotations.parts_cost,
+                quotations.labor_cost,
+                quotations.total_cost,
+                quotations.status,
+                quotations.created_at,
+                quotations.sent_at,
+                quotations.responded_at,
+                quotations.valid_until
+            ')
+            ->join('repair_orders', 'repair_orders.id = quotations.order_id')
+            ->join('customers', 'customers.id = repair_orders.customer_id');
+
+        if ($status) {
+            $builder->where('quotations.status', $status);
+        }
+
+        if ($dateFrom) {
+            $builder->where('DATE(quotations.created_at) >=', $dateFrom);
+        }
+
+        if ($dateTo) {
+            $builder->where('DATE(quotations.created_at) <=', $dateTo);
+        }
+
+        $quotations = $builder->orderBy('quotations.created_at', 'DESC')->findAll();
+
+        // Generate CSV
+        $csvContent = "Quotation Number,Order Number,Customer Name,Phone,Email,Parts Cost,Labor Cost,Total Cost,Status,Created Date,Sent Date,Responded Date,Valid Until\n";
+
+        foreach ($quotations as $quotation) {
+            $csvContent .= sprintf('"%s","%s","%s","%s","%s","%s","%s","%s","%s","%s","%s","%s","%s"' . "\n",
+                $quotation['quotation_number'],
+                $quotation['order_number'],
+                $quotation['customer_name'],
+                $quotation['customer_phone'],
+                $quotation['customer_email'] ?? '',
+                $quotation['parts_cost'],
+                $quotation['labor_cost'],
+                $quotation['total_cost'],
+                $quotation['status'],
+                $quotation['created_at'],
+                $quotation['sent_at'] ?? '',
+                $quotation['responded_at'] ?? '',
+                $quotation['valid_until']
+            );
+        }
+
+        $filename = 'quotations_export_' . date('Y-m-d_H-i-s') . '.csv';
+
+        return $this->response
+            ->setHeader('Content-Type', 'text/csv')
+            ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->setBody($csvContent);
     }
 
     /**
@@ -596,108 +733,125 @@ class QuotationController extends BaseController
      */
     public function bulkAction(): RedirectResponse
     {
-        $action = $this->request->getPost('bulk_action');
         $quotationIds = $this->request->getPost('quotation_ids');
+        $action = $this->request->getPost('action');
 
-        if (!$action || !$quotationIds) {
-            return redirect()->back()->with('error', 'Please select quotations and an action');
+        if (empty($quotationIds) || !is_array($quotationIds)) {
+            return redirect()->back()->with('error', 'Please select quotations to process');
         }
 
-        $processedCount = 0;
+        $successCount = 0;
+        $errorCount = 0;
 
-        switch ($action) {
-            case 'mark_expired':
-                foreach ($quotationIds as $id) {
-                    if ($this->quotationModel->update($id, ['status' => 'expired'])) {
-                        $processedCount++;
-                    }
-                }
-                $message = "{$processedCount} quotations marked as expired";
-                break;
+        foreach ($quotationIds as $quotationId) {
+            $quotation = $this->quotationModel->find($quotationId);
+            if (!$quotation) {
+                $errorCount++;
+                continue;
+            }
 
-            case 'send_reminders':
-                foreach ($quotationIds as $id) {
-                    $quotation = $this->quotationModel->getQuotationWithOrderDetails($id);
-                    if ($quotation && $quotation['status'] === 'sent' && $quotation['customer_email']) {
-                        // Send reminder logic here
-                        $processedCount++;
-                    }
-                }
-                $message = "{$processedCount} reminder emails sent";
-                break;
-
-            case 'delete':
-                foreach ($quotationIds as $id) {
-                    $quotation = $this->quotationModel->find($id);
-                    if ($quotation && in_array($quotation['status'], ['draft', 'expired', 'rejected'])) {
-                        if ($this->quotationModel->delete($id)) {
-                            $processedCount++;
+            switch ($action) {
+                case 'mark_expired':
+                    if ($quotation['status'] === 'sent') {
+                        if ($this->quotationModel->update($quotationId, ['status' => 'expired'])) {
+                            $successCount++;
+                        } else {
+                            $errorCount++;
                         }
+                    } else {
+                        $errorCount++;
                     }
-                }
-                $message = "{$processedCount} quotations deleted";
-                break;
+                    break;
 
-            default:
-                return redirect()->back()->with('error', 'Invalid action selected');
+                case 'delete':
+                    if ($quotation['status'] !== 'approved') {
+                        if ($this->quotationModel->delete($quotationId)) {
+                            $successCount++;
+                        } else {
+                            $errorCount++;
+                        }
+                    } else {
+                        $errorCount++;
+                    }
+                    break;
+
+                default:
+                    $errorCount++;
+                    break;
+            }
         }
 
-        if ($processedCount > 0) {
-            return redirect()->back()->with('success', $message);
-        } else {
-            return redirect()->back()->with('error', 'No quotations were processed');
+        $message = "Processed {$successCount} quotations successfully";
+        if ($errorCount > 0) {
+            $message .= ", {$errorCount} failed";
+        }
+
+        return redirect()->back()->with('success', $message);
+    }
+
+    // ============================================================================
+    // HELPER METHODS
+    // ============================================================================
+
+    /**
+     * Generate unique quotation number
+     */
+    private function generateQuotationNumber(): string
+    {
+        $prefix = 'QT';
+        $date = date('Ymd');
+        $count = $this->quotationModel->where('DATE(created_at)', date('Y-m-d'))->countAllResults() + 1;
+
+        return $prefix . $date . str_pad($count, 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Send quotation email to customer
+     */
+    private function sendQuotationEmail($quotation): bool
+    {
+        try {
+            $email = \Config\Services::email();
+
+            $subject = "Repair Quotation - #{$quotation['order_number']}";
+            $message = view('emails/quotation_sent', [
+                'quotation' => $quotation,
+                'approval_url' => base_url("quotation/{$quotation['id']}")
+            ]);
+
+            $email->setTo($quotation['customer_email']);
+            $email->setSubject($subject);
+            $email->setMessage($message);
+
+            return $email->send();
+        } catch (\Exception $e) {
+            log_message('error', 'Failed to send quotation email: ' . $e->getMessage());
+            return false;
         }
     }
 
     /**
-     * Export quotations to CSV
+     * Send reminder email to customer
      */
-    public function export()
+    private function sendReminderEmail($quotation): bool
     {
-        $quotations = $this->quotationModel->getQuotationsWithDetails();
+        try {
+            $email = \Config\Services::email();
 
-        $filename = 'quotations_export_' . date('Y-m-d_H-i-s') . '.csv';
-
-        header('Content-Type: text/csv');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-
-        $output = fopen('php://output', 'w');
-
-        // CSV headers
-        fputcsv($output, [
-            'Quotation Number',
-            'Order Number',
-            'Customer Name',
-            'Device Type',
-            'Service Cost',
-            'Parts Cost',
-            'Total Cost',
-            'Status',
-            'Created Date',
-            'Valid Until',
-            'Sent Date',
-            'Responded Date'
-        ]);
-
-        // CSV data
-        foreach ($quotations as $quotation) {
-            fputcsv($output, [
-                $quotation['quotation_number'],
-                $quotation['order_number'],
-                $quotation['customer_name'],
-                $quotation['device_type_name'],
-                $quotation['service_cost'],
-                $quotation['parts_cost'],
-                $quotation['total_cost'],
-                ucfirst($quotation['status']),
-                $quotation['created_at'],
-                $quotation['valid_until'],
-                $quotation['sent_at'],
-                $quotation['responded_at']
+            $subject = "Reminder: Quotation #{$quotation['quotation_number']} - Awaiting Your Response";
+            $message = view('emails/quotation_reminder', [
+                'quotation' => $quotation,
+                'approval_url' => base_url("quotation/{$quotation['id']}")
             ]);
-        }
 
-        fclose($output);
-        exit;
+            $email->setTo($quotation['customer_email']);
+            $email->setSubject($subject);
+            $email->setMessage($message);
+
+            return $email->send();
+        } catch (\Exception $e) {
+            log_message('error', 'Failed to send reminder email: ' . $e->getMessage());
+            return false;
+        }
     }
 }
