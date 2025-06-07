@@ -115,8 +115,8 @@
                                     <tr>
                                         <td class="p-3"><?= $part['part_name'] ?></td>
                                         <td class="text-center p-3"><?= $part['quantity'] ?></td>
-<!--                                        <td class="text-right p-3">--><?php //= format_currency($part['price']) ?><!--</td>-->
-<!--                                        <td class="text-right p-3 font-medium">--><?php //= format_currency($part['total_price']) ?><!--</td>-->
+                                        <td class="text-right p-3"><?= format_currency($part['unit_price']) ?></td>
+                                        <td class="text-right p-3 font-medium"><?= format_currency($part['total_price']) ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
